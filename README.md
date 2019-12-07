@@ -2,7 +2,5 @@
  
 [编译原理龙书笔记](https://github.com/Peefy/CompileDragonBook.Cpp/blob/master/doc/NOTE.md)
 
-## 附书练习源码 
-
-[编译原理龙书笔记](https://github.com/Peefy/CompileDragonBook.Cpp/blob/master/src)
+[编译原理附书练习源码](https://github.com/Peefy/CompileDragonBook.Cpp/blob/master/src)
 
