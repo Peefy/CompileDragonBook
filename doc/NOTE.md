@@ -696,6 +696,81 @@ match过程改变了当前被扫描的输入记号lookahead变量的值。
 match(array);match('[');simple;match(']');match(of);type
 ```
 
+示例预测语法分析器的伪代码
+
+```
+procedure match(t : token);
+begin
+    if lookhead == t then
+        lookhead := nexttoken;
+    else error
+end;
+
+procedure type;
+begin
+    if lookahead is in {integer, char, num} then
+        simple;
+    else if lookahead == '↑' then begin
+        match('↑');
+        match(id);
+    end
+    else if lookahead == array then begin
+        match(array); 
+        match('[');
+        simple;
+        match(']');
+        match(of);
+        type;
+    end
+    else error
+end
+
+procedure simple;
+begin
+    if lookahead == integer then
+        match(integer);
+    else if lookahead == char then
+        match(char);
+    else if lookahead == num then begin
+        match(num);
+        match('..');
+        match(num);
+    end
+    else error
+end
+```
+
+在`array`和`[`匹配之后，超前扫描符号是`num`。这时，过程simple被调用
+
+超前扫描符号指导产生式的选择。如果产生式的右部由一个记号开始，则当该记号与超前扫描符号匹配的时候这个产生式被选用
+
+预测分析依赖于产生式右部产生的第一个符号是什么。更精确地说，令a是非终结符A的某产生式的右部。定义FIRST(a)是作为由a产生的一个或多个串的第一个符号出现的集合。
+如果a是e或者可以产生e，则e也属于FIRST(a)
+
+例如
+```
+FIRST(simple) = {integer, char, num}
+FIRST(↑id) = {↑}
+FIRST(array [ simple ] of type) = {array}
+```
+
+实际上，许多产生式的右部都由记号开始，从而简化了FIRST集合的构造。
+
+如果有两个产生式A->a和A->b可供选用，则必须考虑相应的**FIRST集合**。无回溯的递归下降分析方法要求FIRST(a)和FIRST(b)不相交。这样超前扫描符号就可以选择正确的过程去执行。如果超前扫描符号在FIRST(a)集合中，则使用a，否则，如果超前扫描符号在FIRST(b)中，则使用b
+
+右部是e的产生式称为e产生式，需要特殊处理。当没有其他产生式可用的时候，递归下降语法分析器把e产生式作为默认产生式使用。例如
+
+```
+stmt -> begin opt_stmts end
+opt_stmts -> stmt_list | e
+```
+
+当分析到opt_stmts时，如果超前扫描符号没有在FIRST(stmt_list)集合中，则使用e产生式。如果超前扫描符号时end，这种选择是正确的，除了end之外的任何超前扫描符号都将导致一个错误，可以在stmt的语法分析中检测到。
+
+预测语法分析器是一个由多个过程组成的程序，每个过程对应一个非终结符。每个过程完成如下两项任务
+
+* 
+
 ## 第三章：词法分析
 
 ## 第四章：语法分析
