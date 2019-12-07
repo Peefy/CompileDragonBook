@@ -1,0 +1,16 @@
+{
+    ":=" : {
+        "left" : "position", 
+        "right" : {
+            "+" : {
+                "left" : "initial",
+                "right" : {
+                    "*" : {
+                        "left" : "rate", 
+                        "right" : "60"
+                    }
+                }
+            }
+        }
+    }
+}

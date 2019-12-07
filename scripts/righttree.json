@@ -1,0 +1,61 @@
+
+{
+    "node" : "-",
+    "child" : [
+        {
+            "node" : "letter",
+            "child" : [
+                {
+                    "node" : "a",
+                    "child" : "null"
+                }
+            ]
+        },
+        {
+            "node" : "=",
+            "child" : "null"
+        },
+        {
+            "node" : "right",
+            "child" : [
+                {
+                    "node" : "right",
+                    "child" : [
+                        {
+                            "node" : "letter",
+                            "child" : [
+                                {
+                                    "node" : "b",
+                                    "child" : "null"
+                                }
+                            ]
+                        },
+                        {
+                            "node" : "=",
+                            "child" : "null"
+                        },
+                        {
+                            "node" : "right",
+                            "child" : [
+                                {
+                                    "node" : "right",
+                                    "child" : [
+                                        {
+                                            "node" : "letter",
+                                            "child" : [
+                                                {
+                                                    "node" : "c",
+                                                    "child" : "null"
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

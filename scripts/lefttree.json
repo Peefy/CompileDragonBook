@@ -1,0 +1,46 @@
+
+{
+    "node" : "list",
+    "child" : [
+        {
+            "node" : "list", 
+            "child" : [
+                {
+                    "node" : "list",
+                    "child" : [
+                        {
+                            "node" : "digit",
+                            "child" : [
+                                {
+                                    "node" : "9",
+                                    "child" : "null"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "node" : "-",
+                    "child" : "null"
+                },
+                {
+                    "node" : "digit",
+                    "child" : "null"
+                }
+            ]
+        },
+        {
+            "node" : "-",
+            "child" : "null"
+        },
+        {
+            "node" : "digit",
+            "child" : [
+                {
+                    "node" : "2",
+                    "child" : "null"
+                }
+            ]
+        }
+    ]
+}
