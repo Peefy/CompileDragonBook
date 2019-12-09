@@ -17,14 +17,22 @@ static char lookahead;
 static int tokenval = NONE;
 static int lineno = 1;
 
+static void expr();
+static void expr_override();
+static void rest();
+static void rest_override();
+static void term();
+static void match(char c);
+static void error();
+static void factor();
+static int lexan();
 
-
-void expr() {
+static void expr() {
     term();
     rest();
 }
 
-void expr_override() {
+static void expr_override() {
     term();
     while (1) {
         if (lookahead == '+') {
@@ -36,7 +44,7 @@ void expr_override() {
     }
 }
 
-void rest() {
+static void rest() {
     if (lookahead == '+') {
         match('+');
         term();
@@ -51,7 +59,7 @@ void rest() {
     }
 }
 
-void rest_override() {
+static void rest_override() {
     L : 
     if (lookahead == '+') {
         match('+'); term(); putchar('+'); goto L;
@@ -61,7 +69,7 @@ void rest_override() {
     }
 }
 
-void term() {
+static void term() {
     if (isdigit(lookahead)) {
         putchar(lookahead);
         match(lookahead);
@@ -71,18 +79,18 @@ void term() {
     }       
 }
 
-void match(char c) {
+static void match(char c) {
     lookahead == c ? lookahead = getchar() : error();
 }
 
-void error() {
+static void error() {
     // 打印错误信息
     printf("syntax error\n");
     // 停止
     exit(1);
 }
 
-void factor() {
+static void factor() {
     if (lookahead == '(') {
         match('('); expr(); match(')');
     }
@@ -94,7 +102,7 @@ void factor() {
     }
 }
 
-int lexan() {
+static int lexan() {
     int t;
     while (1) { 
         // 从输入流中获取一个字符的ASCII码

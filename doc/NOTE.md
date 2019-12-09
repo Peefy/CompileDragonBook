@@ -1042,7 +1042,635 @@ int lexan() {
 
 #### 处理保留的关键字
 
-上述符号表子程序能够处理任何保留的关键字的集合。例如，考虑具有div和mod词素的两个记号`div`和`mod`。用下面的调用来初始化符号表
+上述符号表子程序能够处理任何保留的关键字的集合。例如，考虑具有div和mod词素的两个记号`div`和`mod`。用下面的调用来初始化符号表：
+
+```
+insert("div", div);
+insert("mod", mod);
+```
+
+符号表如此初始化后，调用lookup("div")将返回记号`div`,于是div不能再被用作标识符。
+
+*任何保留关键字的集合都可以通过适当地初始化符号表而得到正确的处理*
+
+### 符号表的实现方法
+
+首先不希望预留固定的大小的空间来保存形式标识符的词素，因为固定大小可能不足以保存长标识符，而对于短标识符(如i)又会造成空间的浪费。
+
+可以使用单独的数组lexemes存储形成标识符的字符串。每一个字符串用一个字符串终结符EOS结束。EOS不会出现在任何标识符。符号表数组symtable中的每个表项都是一个包含两个域的记录：一个域是指向词素开始位置的指针域lexptr，另一个域是存储记号的token域。符号表可以更多的域以存储属性值，不作详细讨论
+
+下面列出了处理标识符的词法分析器的伪代码
+
+```
+function lexan : integer
+var lexbuf : array[0..100] of char;
+    c : char;
+begin
+    loop begin
+        读一个字符到c
+        if c是空格或制表符 then
+            什么也不做
+        else if c是换行符 then
+            lineno := lineno + 1
+        else if c是一个数字 then begin
+            该数字和其后数字的所表示的数的值存入tokenval
+            return NUM
+        end
+            else if c是一个字母 then begin
+                将c和其后的连续字母和数字存入lexbuf
+                p := lookup(lexbuf)
+                if p = 0 then
+                    p := insert(lexbuf, ID);
+                tokenval := p
+                return 表项p的token域
+            end
+            else begin
+                将tokenval置为NONE;
+                return 字符c的整数编码
+            end
+        end
+end
+```
+
+### 抽象堆栈机
+
+编译器可以划分为前端和后端两部分。前端构造源程序的中间表示，后端从中间生成目标代码。一种流行的中间表示是**抽象堆栈机代码**。编译器划分为前端和后端可以使之经简单修改就可以运行在一台新机器上。
+
+**抽象堆栈机**把*指令存储器*和*数据存储器*分开,并且所有的算术操作都在堆栈上执行。指令个数非常有限，可以分为三类：整型算术、堆栈操作和控制流
+
+#### 算术指令
+
+抽象机必须用中间语言实现每一个操作符。抽象机直接支持像加法和减法这样的简单操作。更复杂的操作需要由一个抽象机指令系列来实现。
+
+为简化堆栈机的描述，假定每个算术操作对应一条指令。
+
+一个算术表达式的抽象机代码用堆栈模拟该后缀表达式的计算。这个计算过程从左到右处理后缀表达式，遇见操作数，就将其压入**堆栈**,当遇到一个k元操作符时，它的最左面的参数在栈顶下面k-1的位置，最右面的参数在栈顶。在栈顶的k个元素上应用这个k元操作符：弹出操作数，并将结果压入堆栈。例如，对*后缀表达式*`13+5*`进行计算时，需要执行下面的动作
+
+* 1入栈
+* 3入栈
+* 将栈顶的两个元素相加，从栈中弹出这两个元素，并将结果4压入堆栈
+* 5入栈
+* 将栈顶的两个元素相乘，从栈中弹出这两个元素，将结果20压入堆栈
+
+最后栈顶元素20是整个表达式的最终结果。
+
+在中间语言中，所有的值都是整数，0可以对应于布尔值false，非0值可以对应于布尔值true。布尔型操作符and和or要求其两个参数都已计算完毕
+
+#### 左值和右值
+
+赋值表达式左部和右部的标识符的含义是不一样的。如赋值语句
+```
+i := 5
+i := i + 1
+```
+表达式的右部是一个整型值，左部是值要存放的位置。与此相似，如果p和q是指向字符的指针，表达式`q↑ := q↑`中，右部`q↑`表示一个字符，左部`p↑`表示这个字符该存储的位置。术语*左值*和*右值*分别指赋值表达式左部和右部对应的值。也就是说，右值是平常意义上的值，而左值是一个位置。
+
+#### 堆栈操作
+
+几个访问数据内存的指令:
+
+* **PSH v**-将v压入栈顶
+* **RVALUE l**-将存储器位置l上的数据内容压入栈
+* **LVALUE l**-将存储器位置l的地址压入栈
+* **POP**-弹出栈顶元素
+* **:=**-栈顶元素的右值被存放到栈顶的下一个元素的左值中，且二者均被弹出
+* **COPY**-把栈顶元素的副本压入栈顶
+
+#### 表达式的翻译
+
+**使用堆栈机计算表达式的代码与表达式的后缀表示密切相关**
+
+根据定义，计算E+F的堆栈机代码是计算E的代码、计算F的代码以及将它们的值相加的指令的连接。因此，将表达式翻译成堆栈机代码可以通过修改翻译器得到
+
+本节生成的表达式堆栈机代码中，数据位置是用符号地址表示的。表达式a+b翻译成
+
+```
+RVALUE a
+RVALUE b
++
+```
+
+即把a和b位置上的数据压入栈顶，然后将栈顶的两个数据弹出，将其相加，把结果压入栈顶。
+
+赋值表达式翻译成堆栈机代码的过程时：被赋值的标识符的左值压入栈顶，计算表达式，将结果的右值赋给标识符。例如，赋值语句：
+
+```
+day := (1461 * y) div 4 + (153 * m + 2) div 5 + d
+```
+
+被翻译成如下形式的代码
+
+```
+LVALUE day   
+PUSH 1464
+RVALUE y
+*
+PUSH 4
+div
+PUSH 153
+RVALUE m
+
+*
+PUSH 2
++ PUSH 5
+div
++
+RVALUE d
++
+:= 
+```
+
+赋值语句可以形式化地表示如下：
+
+```
+stmt -> id := expr { stmt.t := 'lvalue' || id.lexeme || expr.t || ':=' }
+```
+
+每个非终结符具有属性t,t给出这个非终结符的翻译。标识符id的属性lexeme给出了标识符的字符串表示。
+
+#### 控制流
+
+堆栈机是顺序执行指令的，除非碰到条件指令或者无条件转移语句。说明转移目标地址方法有如下几种：
+
+* 转移指令的操作数给出转移的目标地址
+* 转移指令操作数给出转移的相对地址(正数或负数)
+* 用符号表示转移的目标地址，即机器所支持的标号
+
+在前两种方法中，操作数有可能从栈顶获得。
+
+例如，堆栈机的控制流指令如下:
+
+* **LABEL l**-说明转移的目标l
+* **GOTO l**-从标有l的指令开始执行下一条指令
+* **GOFALSE l**-弹出栈顶值，如果是0，则转移到l
+* **GOTRUE l**-弹出栈顶值，如果非0，则转移到l
+* **HALT**-停止执行程序
+
+#### 语句的翻译
+
+条件语句和while语句的代码框架
+
+*if*
+
+```
+expr 代码
+GOFALSE out
+stmt1代码
+LABEL out
+```
+
+*while*
+
+```
+LABEL test
+expr 代码
+GOFALSE out
+stmt1代码
+GOTO test
+LABEL out
+```
+
+在源程序的翻译中，只允许有一个`LABEL out`指令，否则，执行到`GOTO out`语句时将产生冲突而不知道将控制转到何处。因此，当翻译if语句时，需要采取某些机制，用唯一的标号替换代码框架中的out
+
+假设newlabel是一个过程，每次调用它时，返回一个新标号。
+
+```
+stmt -> if expr then stmt1 {
+    out := newlabel;
+    stmt.t = expr.t ||
+        'gofalse' out ||
+        stmt1.t ||
+        'label' out
+}
+```
+
+#### 输出一个翻译
+
+上述的表达式翻译器使用print语句逐渐生成一个表达式的翻译。类似的print语句也可以用于产生一个语句的翻译。此处不再使用print语句而使用emit过程来隐藏输出细节
+
+```
+stmt -> if 
+    expr { out := newlabel; emit('GOFALSE', out); }
+    then
+    stmt1 { emit('label', out); }
+```
+
+当产生式中出现语义动作时，按照从左到右的顺序考虑产生式右部的每一个元素。在上面的产生式中，语义动作的顺序如下：在分析expr指令时out设置成newlabel返回的标号，然后输出`GOFALSE`指令，在分析stmt1语句时，执行语义动作，最后label指令被输出。假设在分析expr和stmt1的过程中，语义动作输出了这些非终结符的代码。
+
+语句序列的翻译是简单地将各个语句连接起来。
+
+多数单入口单出口的语法结构的翻译都和while语句的翻译相似。这一点将通过考虑表达式中的控制流来说明
+
+```
+procedure stmt;
+var test, out: interger; /* 标号 */
+begin
+    if lookahead = id the begin
+        emit('LVALUE', tokenval); match(id); match(':='); expr;
+    end
+    else if lookahead = 'if' then begin
+        match('if');
+        expr;
+        out := newlabel;
+        emit('GOFALSE', out);
+        match('then');
+        stmt;
+        emit('LABEL', out);
+    end
+    else error;
+end
+```
+
+表达式
+```
+expr1 or expr2
+```
+可以实现为
+```
+if expr1 then ture else expr2
+```
+下面的代码可以实现or的操作
+```
+COPY
+GOTURE out
+POP
+expr2
+LABEL out
+```
+
+`GOTRUE`和`GOFALSE`指令弹出栈顶数值来简化条件语句和while语句的代码生成。通过备份expr1的值，如果`GOTRUE`指令产生转移，则栈顶值为真。
+
+用于构建一个编译器前端的语法制导技术。可以给出一个C语言的编写的翻译器，它把用分号分隔的中缀表达式序列翻译为相应的后缀表达式序列。表达式由数字、标识符、操作符(+,-,*,/,div,mod)构成。
+
+### 翻译器的描述
+
+记号`id`用来表示一个由字母开始的非空字母数字序列，num是一个数字序列，eof是一个表示文件结束的字符。记号由空格、制表符和换行符("空白符")分隔：记号`id`的属性lexeme给出了形成该记号的字符串。`num`的属性值value给出了由`num`表示的整型数。
+
+#### 词法分析器模块lexer.c
+
+词法分析器是一个`lexan()`的程序，语法分析器调用`lexan()`程序获取记号。lexan()每次读入一个字符，并将它发现的记号返回给语法分析器。与记号关联的属性的值被赋给全局变量tokenval.
+
+下列记号是语法分析器所需要的：
+
+```
++ - * / DIV MOD (  ) ID NUM DONE
+```
+ID表示一个标识符, NUM是一个数字, DONE是文件末尾字符。空白符已经被词法分析器去除。
+
+词法分析器使用符号表程序lookup判定一个标识符词素是否曾经出现过。insert程序将新词素存储到符号表中。每当读到一个换行符，全局变量lineno加1.
+
+#### 语法分析器模块parser.c
+
+首先上述的翻译模式消除左递归，以使文法可以由递归下降语法分析器进行语法分析。转换后的翻译模式如下述所示.
+
+```
+start -> list eof
+list -> expr; list | e
+expr -> term moreterms
+moreterms -> + term {print('+')} moreterms 
+           | - term {print('+')} moreterms 
+           | e
+term -> factor morefactors
+morefactors -> * factor {print('+')} morefactors 
+             | / factor {print('/')} morefactors 
+             | div factor {print('DIV')} morefactors 
+             | mod factor {print('MOD')} morefactors 
+             | e
+factor -> { expr }
+        | id {print(id.lexeme) }
+        | num {print(num.value) }
+```
+
+函数`parse()`实现文法的启示符号，在它需要一个新的记号时调用`lexan`函数。语法分析器使用`emit`函数产生输出并用`error`函数报告语法错误
+
+#### 输出模块emitter.c
+
+输出模块由单个函数emit(t, tval)组成，它为具有属性值tval的记号t产生输出
+
+#### 符号表模块symbol.c和init.c
+
+符号表的数组symtable的每一项由一个指向lexemes数组的指针和一个表示记号的整数编码组成。insert(s, t)操作返回词素s(词素s构成记号t)在symtable中的索引。lookup(s)函数返回词素s在symtable中项的索引，如果s不存在，返回0.
+
+init.c模块用于为符号表symtable预加载关键字。所有关键字的词素和记号表示都保存在keywords数组中，keywords数组与symtable数组有相同的类型。init()函数顺序地扫描keywords数组，利用insert()操作将关键字插入符号表。这种组织方式使得关键字的记号表示容易改变。
+
+#### 错误处理模块error.c
+
+错误处理模块负责错误的报告，这是极为基本的。一旦语法错误被发现，编译器将显示一条消息说明当前输入行出现错误，并停止分析。
+
+*一种较好的错误恢复技术是使编译器跳过出错的语句，继续进行语法分析*
+
+#### 编译器的建立
+
+global.h
+
+```c
+#ifndef _GLOBAL_H_
+#define _GLOBAL_H_
+
+#include <stdio.h>    // 输入/输出
+#include <ctype.h>    // 加载字符测试程序
+#include <string.h>
+
+#define BSIZE 128     // 缓冲区大小
+#define NONE  -1
+#define EOS   '\0'
+
+#define NUM  256
+#define DIV  257
+#define MOD  258
+#define ID   259
+#define DONE 260
+
+#ifndef pass
+#define pass
+#endif
+
+extern int tokenval;  // 记号的属性值
+extern int lineno;    // 行号
+
+// 符号表的表项格式
+typedef struct entry {
+    char * lexptr;
+    int token;
+} entry;
+
+entry symtabel[];
+
+/* function declare  */
+
+void error(const char* m);  // 生成所有的出错信息
+void emit(int t, int tval);  // 生成输出
+int lookup(char s[]); // 返回s符号表项的位置
+int insert(char s[], int tok); // 插入符号表，返回s表项的位置
+int lexan();  // 词法分析器 或者记号 token 
+void parse(); // 分析并翻译表达式列表
+void init();
+
+#endif
+
+```
+
+emtter.c
+
+```c
+
+#include "global.h"
+
+// 打印输出模块
+
+// 生成输出
+void emit(int t, int tval) {
+    switch (t)
+    {
+    case '+': case '-': case '*': case '/':
+        printf("%c\n", t);
+        break;
+    case DIV:
+        printf("DIV\n"); break;
+    case MOD:
+        printf("MOD\n"); break;
+    case NUM:
+        printf("%d\n", tval); break;
+    case ID:
+        printf("%s\n", symtabel[tval].lexptr); break;
+    default:
+        printf("token %d, tokenval %d\n", t, tval); break;
+    }
+}
+```
+
+error.c
+
+```c
+
+#include "global.h"
+
+// 错误处理模块
+
+// 生成所有的出错信息
+void error(const char* m) {
+    fprintf(stderr, "line: %d : %s\n", lineno, m);
+    exit(1);  /* 非正常终止 */
+}
+
+```
+
+init.c
+
+```c
+
+#include "global.h"
+
+// 初始化模块
+
+// 关键字
+entry keywords[] = {
+    {"div", DIV},
+    {"mod", MOD},
+    {"0", 0},  // 关键字结尾
+};
+
+// 将关键字填入符号表
+void init() {
+    entry * p;
+    for (p = keywords;p->token;p++) {
+        insert(p->lexptr, p->token);
+    }
+}
+
+void main() {
+    init();
+    parse();
+    exit(0);
+}
+
+```
+
+lexer.c
+
+```c
+
+#include "global.h"
+
+// 词法分析器模块
+
+char lexbuf[BSIZE];
+int tokenval = NONE;  // 记号的属性值
+int lineno = 1;    // 行号
+
+// 词法分析器 或者记号 token 
+int lexan() {
+    int t;
+    for (;;) {
+        t = getchar();  // 从字节流获取一个字符
+        if (t == ' ' || t == '\t' || t == '\v') // 去除空白符
+            pass;
+        else if (t == '\n' || t == '\r')  // 检测换行符
+            lineno = lineno + 1;
+        else if (isdigit(t)) {
+            ungetc(t, stdin);
+            scanf("%d", &tokenval);
+            return NUM;
+        }
+        else if (isalpha(t)) {
+            int p, b = 0;
+            while (isalnum(t)) {
+                lexbuf[b] = t;
+                t = getchar();
+                b = b + 1;
+                if (b > BSIZE)
+                    error("compiler error");
+            }
+            lexbuf[b] = EOS;
+            if (t != EOF)
+                ungetc(t, stdin);
+            p = lookup(lexbuf);
+            if (p == 0)
+                p = insert(lexbuf, ID);
+            tokenval = p;
+            return symtabel[p].token;
+        }
+        else if (t == EOF)
+            return DONE;
+        else {
+            tokenval = NONE;
+            return t;
+        }
+    }
+}
+
+```
+
+parse.c
+
+```c
+
+#include "global.h"
+
+// 词法翻译器模块
+
+int lookahead;
+
+static void expr();
+static void term();
+static void factor();
+static void match(int t);
+
+// 分析并翻译表达式列表
+void parse() {
+    lookahead = lexan();
+    while (lookahead != DONE) {
+        // 匹配表达式
+        expr(); 
+        // 每个表达式结尾要匹配句尾;
+        match(';');
+    }
+}
+
+static void expr() {
+    int t;
+    term();
+    while (1) {
+        switch (lookahead)
+        {
+        // + - 优先级比* / ( ) 低，最后匹配
+        case '+': case '-':
+            t = lookahead;
+            match(lookahead); term(); emit(t, NONE);
+            break;
+        default:
+            return;
+        }
+    }
+}
+
+static void term() {
+    int t;
+    factor();
+    while (1) {
+        switch (lookahead)
+        {
+        case '*': case '/': case DIV: case MOD:
+            t = lookahead;
+            match(lookahead); factor(); emit(t, NONE);
+            break;  
+        default:
+            return;
+        }
+    }
+}
+
+static void factor() {
+    switch (lookahead)
+    {
+    case '(':
+        match('('); expr(); match(')'); 
+        break;
+    case NUM:
+        emit(NUM, tokenval); match(NUM); 
+        break;
+    case ID:
+        emit(ID, tokenval); match(ID); 
+        break;
+    default:
+        break;
+    }
+}
+
+static void match(int t) {
+    if (lookahead == t)
+        lookahead = lexan();
+    else 
+        error("syntax error!");
+}
+
+```
+
+symbol.c
+
+```c
+
+#include "global.h"
+
+// 符号模块
+
+#define STRMAX 999    // lexemes数组的大小
+#define SYMMAX 1000   // symtable的大小
+
+char lexemes[STRMAX];
+int lastchar = -1;   // lexemes中最后引用的位置
+entry symtabel[SYMMAX];
+int lastentry = 0;   // symtable中最后引用的位置
+
+// 返回s符号表项的位置
+int lookup(char s[]) {
+    int p = 0;
+    for (p = lastentry;p > 0; p = p - 1) {
+        if (strcmp(symtabel[p].lexptr, s) == 0)
+            return p;
+    }
+    return 0;
+}
+
+// 插入符号表，返回s表项的位置
+int insert(char s[], int tok) {
+    int len;
+    len = strlen(s);
+    if (lastentry + 1 >= SYMMAX) {
+        error("symbol table full!");
+    }
+    if (lastchar + len + 1 >= STRMAX) {
+        error("lexemes array full!");
+    }
+    lastentry = lastentry + 1;
+    symtabel[lastentry].token = tok;
+    symtabel[lastentry].lexptr = &lexemes[lastchar + 1];
+    lastchar = lastchar + len + 1;
+    strcpy(symtabel[lastentry].lexptr, s);
+    return lastentry;
+}
+
+```
 
 ## 第三章：词法分析
 
