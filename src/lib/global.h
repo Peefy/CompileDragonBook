@@ -25,7 +25,9 @@ extern int lineno;    // 行号
 
 // 符号表的表项格式
 typedef struct entry {
+    // 指向记号词素内容的指针
     char * lexptr;
+    // 记号
     int token;
 } entry;
 
