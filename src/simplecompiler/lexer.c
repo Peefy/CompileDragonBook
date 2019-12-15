@@ -47,3 +47,9 @@ int lexan() {
         }
     }
 }
+
+token nexttoken() {
+    while (1) {
+        
+    }   
+}

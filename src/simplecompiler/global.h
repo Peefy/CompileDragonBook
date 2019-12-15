@@ -33,6 +33,13 @@ typedef struct entry {
 
 entry symtabel[];
 
+typedef struct token
+{
+    int tokenval;
+    int lexptr;
+} token;
+
+
 /* function declare  */
 
 void error(const char* m);  // 生成所有的出错信息
