@@ -2339,6 +2339,52 @@ else return "no"
 
 从NFA构造识别同样语言的DFA算法：这个算法通常被称为子集构造算法，有利于使用计算机程序模拟NFA。一个和它紧密相关的算法在下一章构造LR语法分析器时将起到重要作用
 
+在NFA的转换表中，每个表项是一个状态集；而在DFA的转换表中，每个表项只有一个状态。从NFA变换到DFA的基本思想是让DFA的每个状态对应NFA的一个状态集。这个DFA用它的状态去记住NFA在读输入符号后到达的所有状态。这个子集T是从NFA的开始状态沿着那些标有a1a2...an的路径能达到的所有状态的集合。DFA的状态数有可能是NFA状态数的指数。
+
+**子集构造算法**
+
+输入：一个NFA N
+
+输出：一个接受同样语言的DFA D
+
+方法：为D构造转换表Dtram，DFA的每个状态是NFA的状态集，D将“并行”地模拟N对输入串的所有可能的移动
+
+用下表的操作来记录NFA的状态集的轨迹(是代表NFA的状态，T代表NFA的状态集)
+
+在读入一个输入符号前，N可以处于集合e-closure(s0)中的任何状态上，其中s0是N的开始状态。假定从s0出发经过输入字符串上的一系列移动，N到达集合T中的状态。令a是下一个输入符号。遇到a时，N可以移动到集合move(T,a)中的任何状态。由于由于e转换，遇到a以后，N可以处于e-closure(move(T, a))中的任何状态
+
+操作|描述
+-|-
+e-closure(s)|从NFA状态s只经过e转换可以到达的NFA状态集
+e-closure(T)|从T中的状态只经过e转换可以到达的NFA状态集
+move(T,a)|从T的状态s
+
+```
+初始时，e-closure(s0)是Dstates中唯一的状态且未被标记；
+while Dstates中存在一个未标记的状态T do begin
+    标记T：
+    for 每个输入符号a do begin
+        U := e-closure(move(T, a))
+        if U 没在Dstates中 then
+            将U作为一个未标记的状态添加到Dstate中；
+        Dtran[T,a] := U
+    end
+end
+```
+
+```
+将T中所有的状态压入栈stack中；
+将e-closure(T)初始化为T；
+while 栈stack不空 do begin
+    将栈顶元素t弹出栈；
+    for 每个这样的状态u：从1到u有一条标记为e的边 do
+        if u 不在e-closure(T) do begin
+            将u添加到e-closure(T);
+            将u压入栈stack中
+        end
+end
+```
+
 ## 第四章：语法分析
 
 ## 第五章：语法制导翻译
