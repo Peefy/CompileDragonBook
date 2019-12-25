@@ -10,7 +10,7 @@
 
 [-opa，一个统一policy的方案，自带了json like dsl和controller](https://github.com/open-policy-agent/opa) 
 
-[目前opa会把dsl的执行计划通过wasm打包，然后让controller调用wasm程序做判断](https://github.com/open-policy-agent/opa/tree/master/wasm)  
+[目前opa会把dsl的执行计划(policies)通过wasm打包编译为WebAssembly，然后让controller调用wasm程序做判断](https://github.com/open-policy-agent/opa/tree/master/wasm)  
 
 [统一controller的部分，一个基于k8s的operator](https://github.com/open-policy-agent/gatekeeper)
 
