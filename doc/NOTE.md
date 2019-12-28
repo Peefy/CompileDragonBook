@@ -2872,8 +2872,68 @@ A3 -> e
 ```
 stmt -> if expr then stmt
     | if expr then stmt else stmt
-    | other
+    | other            
+    (4-7)
 ```
+
+这里，other代表任何其他语句。复合条件语句
+
+```
+if E1 then S1 else if E2 then S2 else S3
+```
+
+文法(4-7)具有二义性的，因为串`if E1 then if E2 then S1 else S2`有两棵分析树。而一般规则是，每个else和前面最近的没有配对的then配对，当然这条避免二义性的规则可以直接并入文法中。例如，可以把上述文法改写成下面的无二义性文法，其基本思想是：出现在then和else之间的语句必须是“配对”的，即它不能以一个未配对的then后面跟随任意的非else语句结束，于是else会被迫与这个未配对的then匹配。配对的语句是一个不包含不配对语句的if-then-else语句或者任何非条件语句。因此，按照上述思想改写后的文法如下：
+
+```
+stmt -> matched_stmt
+    | unmatched_stmt
+matched_stmt -> if expr then matched_stmt else matched_stmt
+    | other
+unmatched_stmt -> if expr then stmt 
+    | if expr then matched_stmt else unmatched_stmt
+```
+
+#### 消除左递归
+
+如果文法G具有一个非终结符A使得对某个字符串α存在推导`A +-> Aα`,则称G是左递归的。自顶向下语法分析法不能处理左递归文法，因此需要一种消除左递归的变换。
+
+左递归产生式`A -> A α|β`可以由下面的非左递归产生式来代替:
+
+```
+A -> βA'    A' -> αA' | e
+```
+
+这种变换没有改变从A推导出的字符串集合。这条规则适用于很多文法。
+
+例子：考虑下面的算术表达式文法
+```
+E -> E + T | T
+T -> T * F | F
+F -> (E) | id
+```
+消除E和T的直接左递归(形如`A -> Aα`的产生式)，可以得到
+```
+E -> TE'
+E' -> +TE'| e
+T -> FT'
+T' -> *FT' | e
+F -> (E) | id
+```
+无论有多少A产生式，都可以用下面的技术来消除直接左递归。首先，把A产生式放在一起：
+```
+A -> Aα1 | Aα2 | ... | Aαm | β1 | β2 | ... | βm 
+```
+其中，每个βi都不以A开头。然后用下面的产生式代替A产生式：
+```
+A  -> β1A' | β2A' | ... | βmA'
+A' -> α1A' | α2A' | ... | αmA' | e 
+```
+变换后的非终结符A与变换前的非终结符A产生同样的字符串集合，但已经没有左递归了。这种方法可以从A产生式和A'产生式(假定αi都不等于e)消除直接左递归，但不能消除包括两步或多步推导的左递归。例如，考虑文法
+```
+S -> Aa | b
+A -> Ac | Sd | e
+```
+
 
 ## 第五章：语法制导翻译
 
