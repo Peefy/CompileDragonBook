@@ -87,3 +87,79 @@ OPA提供了一种高级声明性语言，以在整个堆栈中编写和实施�
 ```cmd
 opa run data.json
 ```
+
+### 编译相关的程序
+
+* **解释程序 (interpreter)**-
+* **汇编程序（assembler）**-
+* **连接程序（linker）**-
+* **装入程序（loader）**-
+* **预处理器（preprocessor）**-
+* **编辑器（editor）**-
+* **调试程序（debugger）**-
+* **描述器（profiler）**-
+* **项目管理程序（project manager）**-
+
+### 编译相关的步骤
+
+* **扫描程序（scanner）**-
+* **语法分析（parser）**-
+* **语义分析（semantic analyzer）**-
+* **优化程序（source code optimizer）**-
+* **代码生成（code generator）**-
+* **目标代码（target code optimizer）**-
+
+### 编译相关的记号
+
+* **记号（token）**-
+* **语法树（syntax tree）**-
+* **符号表（symbol table）**-
+* **常数表（literal table）**-
+* **中间代码（intermediate code）**-
+* **临时文件（temporary file）**-
+
+### cpython的核心部分，如何通过反射机制来扩展语言
+
+#### cpython的核心部分
+
+* 基本对象
+1. dict
+2. long/int
+3. unicode/str
+4. list(timsort)
+5. tuple
+6. bytes
+7. bytearray(buffer protocol)
+8. float
+9. func(user-defined method)
+10. method(builtin method)
+11. iter
+12. gen(generator/coroutine/async generator)
+13. class(bound method/classmethod/staticmethod)
+14. complex
+15. enum
+16. type(mro/metaclass/类/实例的创建过程)
+* 模块
+1. io
+* 库
+1. re
+* 解释器 (interpreter)
+1. gil(全局解释器锁)
+2. gc(垃圾回收机制)
+3. memory management(内存管理机制)
+4. descr(访问(类/实例)属性时发生了什么/__get__/__getattribute__/__getattr__)
+5. exception(异常处理机制)
+6. module(import实现机制)
+7. frame
+8. code
+9. slots/__slots__(属性在类/实例创建时是如何初始化的)
+10. thread(线程)
+11. PyObject(基础篇/概述)
+* 扩展
+* 语法
+1. token
+2. paser
+3. sym table
+4. ast
+
+CPython本身无法支持JIT编译(just-in-time compilation)使得纯python的执行速度不如Java和Javascript等语言。
