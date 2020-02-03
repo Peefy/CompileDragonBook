@@ -53,15 +53,13 @@ CPython本身无法支持JIT编译(just-in-time compilation)使得纯python的�
 * **Mac**-Python on macOS
 * **Misc**-Python 杂项
 * **Modules**-Python的库和组件
-* **Objects**-PYthon内部对象的实现
-* **PC**-
-* **PCbuild**-
-* **Parser**-
-* **Programs**-
-* **Python**-
-* **Tools**-
-* **m4**-
-* ****-
+* **Objects**-Python内部对象的实现
+* **PC**-用于PC发行版的子目录
+* **PCbuild**-用于PC Windows平台和MSVC的构建和编译
+* **Parser**-解析器
+* **Programs**-二进制可执行文件的源文件
+* **Python**-主Python共享库的其他源文件
+* **Tools**-用于构建Python的一些工具
 
 # cpython如何通过反射机制来扩展语言
 
