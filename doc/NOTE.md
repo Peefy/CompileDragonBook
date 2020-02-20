@@ -5909,6 +5909,32 @@ M -> e
 翻译方案
 
 ```
+1) B -> B1 || M B2 {backpatch(B1.falselist.M.instr);
+                    B.truelist = merge(B1.truelist, B2.truelist);
+                    B.falselist = B2.falselist;}
+
+2) B -> B1 && M B2 {backpatch(B1.truelist, M.instr);
+                    B.truelist = B2.truelist;
+                    B.falselist = merge(B1.falselist,B2.falselist);}
+
+3) B -> !B1  {B.truelist = B1.falselist;
+              B.falselist = B1.truelist;}
+
+4) B -> (B1) {B.truelist = B1.falselist;
+              B.falselist = B1.falselist;}
+
+5) B -> E1 rel E2 {B.truelist = makelist(nextinstr);
+                   B.falselist = makelist(nextinstr + 1);
+                   gen('if', E1.addr rel.op E2.addr 'goto _');
+                   gen('goto _')}
+
+6) B -> true {B.truelist = makelist(nextinstr);
+              gen('goto _');}
+
+7) B -> false {B.falselist = makelist(nextinstr);
+               gen('goto _');}
+
+8) M -> e    {M.instr = nextinstr;}
 ```
 
 考虑上述文法中对应于规则`B -> B1 || MB2`的语义动作(1)。如果B1为真，那么B也为真，这样B1.truelist中的跳转指令就成为B.truelist的一部分。然而，如果B1为假。下一步必须测试B2。因此，B1.falselist中的跳转指令的目标必定是B2的代码的起始位置。这个位置使用标记非终结符号M获得。在即将生成B2代码之前，M生成了下一条指令的序号，存放在综合属性M.instr中。
@@ -5923,7 +5949,56 @@ M.instr = nextinstr;
 
 `B -> B1 && M B2`的语义动作(2)和动作(1)类似。`B -> !B`的语义动作(3)的对换真假列表。动作(4)只是忽略括号
 
-为简单起见，语义动作(5)生成了两条指令：一个条件
+为简单起见，语义动作(5)生成了两条指令：一个条件转移指令goto和一个无条件转移指令。它们的目标标号都未填写。这两个指令被放入新的分别由B.truelist和B.falselist指向的列表中。
+
+#### 控制转移语句
+
+使用回填技术在一趟扫描中完成控制流语句的翻译。考虑由下列文法产生的语句
+
+```
+S -> if (B) S | if (B) S else S | while(B) S | {L} | A;
+L -> L S | S
+```
+
+这里S表示一个语句，L是一个语句的列表，A是一个赋值语句，B是一个布尔表达式。请注意，一定还存在一些其他的产生式，比如那些关于赋值语句的产生式。然而，这里给出的这些产生式已经足以用来说明来控制流语语句的翻译中用到的技术。
+
+语句if，if-else和while代码布局和之前描述的那样，给出一个隐含的假设，即指令数组中的代码顺序反映了控制流的自然流动，即控制从一条语句到达下一条语句。加入如果没有这个假设，那么就必须明确插入跳转指令来实现自然的顺序控制流。
+
+下述的翻译方案保留了多个跳转指令列表，当确定了这些跳转指令的目标序号后就会回填列表。由非终结符号B生成的布尔表达式有两个跳转指令列表：B.truelist和B.falselist。它们分别对应于B的代码的真假出口。由非终结符号S和L生成的语句也有一个待回填的跳转指令列表，由属性nextlist表示。列表S.nextlist中包含了所有跳转按照运行顺序紧跟在S代码之后的指令的条件或无条件转移指令。L.nextlist的定义与此类似。
+
+#### break语句，continue语句和goto语句
+
+用于改变程序控制流的最基本的程序设计语言结构是goto语句。在C语言中，像goto L这样的语句将控制流跳转到标号为L的指令----在相应作用域内必须恰好存在一条标号为L的指令----在相应作用域内必须恰好存在一条标号为L的语句。
+
+在实现goto语句时，可以为每个标号维护一个未完成跳转指令列表，然后在知道这些指令的目标之后进行回填。
+
+Java废除了goto语句。但是Java支持一种规范化的跳转语句，即break语句。它使控制流跳出外围的语言结构。Java中还可以使用continue语句。这个语句的作用是触发外围循环的下一轮迭代。下面的摘自一个语法分析器，它说明了简单的break语句和continue语句。
+
+```cpp
+for (;;readch()) {
+    if (peek == ' ' || peek == '\t') continue;
+    else if (peek == '\n') line = line + 1;
+    else break;
+}
+```
+
+如果S表示外围的循环结构，那么一条break语句就是跳转到S代码之后的第一条指令处的跳转指令。可以按照下面的步骤为break生成代码：
+
+* 跟踪外围循环语句S；
+* 为该break语句生成未完成的跳转指令；
+* 将这些指令放到S.nextlist中
+
+是一个通过两趟扫描构建AST的编译器的前端中，S.nextlist可以被实现为对应于语句S的结点的一个字段，可以在符号表中将一个特殊的标识符break映射为表示外围循环语句S的结点，以此来跟踪S。这种方法同样可以处理java中带标号的break语句，因为同样可以用符号表来将这个标号映射为对应于标号所指的结构的语法树结点。
+
+如果不使用符号表来访问S的结点，还可以在符号表中设置一个指向S.nextlist的指针。现在当遇到一个break语句时，生成一个未完成的跳转指令，并通过符号表查找到nextlist，然后把这个跳转指令加入到这个列表中。这个nextlist按照上节的方法进行回填。
+
+continue语句的处理方法和break语句的处理方法类似。两者的主要区别在于生成的跳转指令的目标不同。
+
+### switch语句
+
+switch语句中包含一个待求值的选择表达式E，后面是该表达式可能取的n个常量值。语句中也可能默认包含一个默认值，当其他值都不和选择表达式值匹配时，就用这个默认值匹配。
+
+#### switch语句的翻译
 
 ## 第七章：运行时环境
 
@@ -5937,7 +6012,7 @@ M.instr = nextinstr;
 
 ## 第十二章：过程间分析
 
-<!-- 龙书第2版看到了第279页>
+<!-- 龙书第2版看到了第284页>
 <!-- 龙书第3版看到了第...页 >
 
 
