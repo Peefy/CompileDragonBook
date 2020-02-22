@@ -1,6 +1,6 @@
 
 
-## cpython的核心部分
+## CPython的核心部分
 
 * 基本对象
 1. dict
@@ -44,7 +44,7 @@
 
 CPython本身无法支持JIT编译(just-in-time compilation)使得纯python的执行速度不如Java和Javascript等语言。
 
-## cpython peefy note
+## CPython peefy note
 
 * **Doc**-一些RST文档，RST与Python类似Javadoc与Java，如果下载了Python源码，里面有rst文件夹，可以转为html后用浏览器打开，具体为：安装python的sphinx模块：pip install sphinx
 * **Grammer**-定义了语法Grammer和记号token的文件
@@ -61,5 +61,6 @@ CPython本身无法支持JIT编译(just-in-time compilation)使得纯python的�
 * **Python**-主Python共享库的其他源文件
 * **Tools**-用于构建Python的一些工具
 
-# cpython如何通过反射机制来扩展语言
+## CPython如何通过反射机制来扩展语言
+
 
