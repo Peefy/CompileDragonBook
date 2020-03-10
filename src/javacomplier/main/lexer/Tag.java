@@ -5,6 +5,9 @@ package lexer;
  * 其中的三个常量INDEX，MINUS，TEMP不是词法单元，将在语法分析中使用
  */
 public class Tag {
+    /**
+     * 
+     */
     public static final int 
         AND = 256,     // &&
         BASIC = 257,   // 

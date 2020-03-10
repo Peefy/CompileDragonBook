@@ -9,16 +9,32 @@ import symbols.*;
  * Lexer
  */
 public class Lexer {
+    /**
+     * 
+     */
     public static int line = 1;
 
+    /**
+     * 
+     */
     char peek = ' ';
 
+    /**
+     * 符号表
+     */
     Hashtable<String, Word> words = new Hashtable<>();
 
+    /**
+     * 
+     * @param w
+     */
     void reserse(Word w) {
         words.put(w.lexname, w);
     }
 
+    /**
+     * 
+     */
     public Lexer() {
         reserse(new Word("if", Tag.IF));
         reserse(new Word("else", Tag.ELSE));
@@ -27,16 +43,26 @@ public class Lexer {
         reserse(new Word("break", Tag.BREAK));
         reserse(Word.True);
         reserse(Word.Flase);
-        // reserse(Type.Int);
-        // reserse(Type.Char);
-        // reserse(Type.Bool);
-        // reserse(Type.Float);
+        reserse(Type.Int);
+        reserse(Type.Char);
+        reserse(Type.Bool);
+        reserse(Type.Float);
     }
 
+    /**
+     * 
+     * @throws IOException
+     */
     void readch() throws IOException {
         peek = (char)System.in.read();
     }
     
+    /**
+     * 
+     * @param c
+     * @return
+     * @throws IOException
+     */
     boolean readch(char c) throws IOException {
         readch();
         if (peek != c)
@@ -45,6 +71,11 @@ public class Lexer {
         return true;
     }
 
+    /**
+     * 
+     * @return
+     * @throws IOException
+     */
     public Token scan() throws IOException {
         for (;;readch()) {
             if (peek == ' ' || peek == '\t')

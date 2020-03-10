@@ -7,10 +7,17 @@ import lexer.Lexer;
  */
 public class Parser {
 
+    /**
+     * 
+     * @param lexer
+     */
     public Parser(Lexer lexer) {
 
     }
 
+    /**
+     * 
+     */
     public void program() {
 
     }
