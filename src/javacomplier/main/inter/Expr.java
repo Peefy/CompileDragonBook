@@ -67,7 +67,7 @@ public class Expr extends Node {
             emit("if " + test + " goto L" + t);
         }
         else if (f != 0) {
-            emit("iffalse " + test + " goto L" + f)
+            emit("iffalse " + test + " goto L" + f);
         }
     }
 
