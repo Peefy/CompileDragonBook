@@ -56,6 +56,11 @@ public class Parser {
      */
     public void program() throws IOException {
         Stmt s = block();
+        int begin = s.newlabel();
+        int after = s.newlabel();
+        s.emitlabel(begin);
+        s.gen(begin, after);
+        s.emitlabel(after);
     }
 
     private Stmt block() throws IOException {
@@ -66,7 +71,7 @@ public class Parser {
         Stmt s = stmts();
         match('}');
         top = savedEnv;
-        return null;
+        return s;
     }
 
     private void decls() throws IOException {
@@ -108,7 +113,7 @@ public class Parser {
 
     private Stmt stmt() throws IOException {
         Expr x;
-        Stmt s, s1, s2;
+        Stmt s1, s2;
         Stmt savedStmt;
         switch(look.tag) {
             case ';':
@@ -267,7 +272,6 @@ public class Parser {
                 error("syntax error");
                 return x;
             case Tag.ID:
-                String s = look.toString();
                 Id id = top.get(look);
                 if (id == null)
                     error(look.toString() + " undeclare");

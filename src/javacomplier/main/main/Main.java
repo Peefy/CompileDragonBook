@@ -12,9 +12,13 @@ public class Main {
     public static void main(String[] args) {
         System.out.println("Hello Java Compiler!");
         Lexer lex = new Lexer();
-        Parser parser = new Parser(lex);
-        parser.program();
-        System.out.println(""); 
+        try {
+            Parser parser = new Parser(lex);
+            parser.program();
+        } catch (IOException e) {
+            System.out.println("error"); 
+        }
+        System.out.println("finish"); 
     }
     
 }
