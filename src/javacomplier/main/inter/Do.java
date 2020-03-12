@@ -8,6 +8,11 @@ import symbols.*;
 public class Do extends Stmt {
     Expr expr;
     Stmt stmt;
+
+    public Do() {
+        
+    }
+
     public Do(Expr x, Stmt s) {
         expr = x;
         stmt = s;

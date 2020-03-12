@@ -8,8 +8,8 @@ import symbols.*;
  */
 public class Not extends Logical {
 
-    public Not(Token tok, Expr x1, Expr x2) {
-        super(tok, x1, x2);
+    public Not(Token tok, Expr x2) {
+        super(tok, x2, x2);
     }
 
     @Override
