@@ -1,5 +1,4 @@
 
-
 ## CPython的核心部分
 
 * 基本对象
@@ -60,6 +59,47 @@ CPython本身无法支持JIT编译(just-in-time compilation)使得纯python的�
 * **Programs**-二进制可执行文件的源文件
 * **Python**-主Python共享库的其他源文件
 * **Tools**-用于构建Python的一些工具
+
+### CPython源代码布局
+
+对于Python模块，典型的布局为：
+
+* `Lib/<module>.py`
+* `Modules/_<module>.c` （如果还有C加速器模块）
+* `Lib/test/test_<module>.py`
+* `Doc/library/<module>.rst`
+
+对于仅扩展模块，典型布局为：
+
+* `Modules/<module>module.c`
+* `Lib/test/test_<module>.py`
+* `Doc/library/<module>.rst`
+
+对于内置类型，典型的布局为：
+
+* `Objects/<builtin>object.c`
+* `Lib/test/test_<builtin>.py`
+* `Doc/library/stdtypes.rst`
+
+对于内置函数，典型布局为：
+
+* `Python/bltinmodule.c`
+* `Lib/test/test_builtin.py`
+* `Doc/library/functions.rst`
+
+一些例外的类型：
+
+* 内置类型`int`位于`Objects/longobject.c`
+* 内置类型`str`位于`Objects/unicodeobject.c`
+* 内置模块`sys`位于`Python/sysmodule.c`
+* 内置模块`marshal`位于`Python/marshal.c`
+* 仅Windows模块`winreg`位于`PC/winreg.c`
+
+## 一些CPython源码教程
+
+[You Guide to the CPython Source Code](https://realpython.com/cpython-source-code-guide/)
+
+[Official](https://devguide.python.org/exploring/)
 
 ## CPython如何通过反射机制来扩展语言
 
