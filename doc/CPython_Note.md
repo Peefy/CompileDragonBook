@@ -99,7 +99,7 @@ CPython本身无法支持JIT编译(just-in-time compilation)使得纯python的�
 
 [You Guide to the CPython Source Code](https://realpython.com/cpython-source-code-guide/)
 
-[Official](https://devguide.python.org/exploring/)
+[Official CPython Note](https://devguide.python.org/exploring/)
 
 ## CPython如何通过反射机制来扩展语言
 
