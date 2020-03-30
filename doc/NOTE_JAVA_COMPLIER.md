@@ -3,7 +3,7 @@
 
 # 一个完整的编译器前端
 
-[完整代码链接]((https://github.com/Peefy/CompileDragonBook.Cpp/blob/master/src/javacomplier/main))
+[完整代码链接](https://github.com/Peefy/CompileDragonBook.Cpp/blob/master/src/javacomplier/main)
 
 使用Java代码实现，由5个包组成，`main`，`lexer`，`symbol`，`parser`和`inter`。包inter中包含的类处理用抽象语法表示的语言结构。因为语法分析器的代码和其他各个包交互，所以它将在最后描述。
 
