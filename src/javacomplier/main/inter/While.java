@@ -5,7 +5,7 @@ import symbols.*;
 /**
  * While
  */
-public class While extends Stmt{
+public class While extends Stmt {
     Expr expr;
     Stmt stmt;
     public While() {

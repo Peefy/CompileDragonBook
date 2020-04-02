@@ -1,6 +1,5 @@
 package inter;
 
-import symbols.*;
 
 /**
  * If
