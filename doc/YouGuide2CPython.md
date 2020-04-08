@@ -287,7 +287,7 @@ $ ./python.exe -m tokenize -e test_tokens.py
 4,0-4,0:            ENDMARKER      ''    
 ```
 
-在输出中，tokenize模块隐含了一些不在文件中的令牌。的ENCODING令牌utf-8，末尾为空行，DEDENT用于关闭函数声明，并提供ENDMARKER来结束文件。最佳做法是在Python源文件的末尾添加一个空行。
+在输出中，tokenize模块隐含了一些不在文件中的词法。的ENCODING词法utf-8，末尾为空行，DEDENT用于关闭函数声明，并提供ENDMARKER来结束文件。最佳做法是在Python源文件的末尾添加一个空行。
 
 该tokenize模块是用纯Python编写的，位于Lib/tokenize.pyCPython源代码中。
 
@@ -443,6 +443,8 @@ CPython源代码样式：
 * 有时，加载程序必须看到“内部”功能。我们_Py为此使用前缀，例如_PyObject_Dump。
 * 宏应该有一个混合词的前缀，然后用大写，例如PyString_AS_STRING，Py_PRINT_RAW。
 
+### CPython 建立运行时配置
+
 可以看到在执行任何Python代码之前，运行时首先会建立配置。运行时的配置是在Include/cpython/initconfig.hnamed中定义的数据结构PyConfig。配置数据结构包括以下内容：
 
 * 各种模式的运行时标志，例如调试和优化模式
@@ -451,5 +453,565 @@ CPython源代码样式：
 * 运行时设置的环境变量
 
 配置数据主要由CPython运行时用来启用和禁用各种功能。
+
+Python还带有几个命令行界面选项。在Python中，可以启用带有`-v`标志的详细模式。在详细模式下，Python将在模块加载时将消息打印到屏幕上：
+
+```sh
+$ ./python.exe -v -c "print('hello world')"
+# installing zipimport hook
+import zipimport # builtin
+# installed zipimport hook
+...
+```
+
+可以在`Include/cpython/initconfig.h`中看到配置`PyConfig`的定义：
+
+```cpp
+/* --- PyConfig ---------------------------------------------- */
+
+typedef struct {
+    int _config_version;  /* Internal configuration version,
+                             used for ABI compatibility */
+    int _config_init;     /* _PyConfigInitEnum value */
+
+    ...
+
+    /* If greater than 0, enable the verbose mode: print a message each time a
+       module is initialized, showing the place (filename or built-in module)
+       from which it is loaded.
+
+       If greater or equal to 2, print a message for each file that is checked
+       for when searching for a module. Also provides information on module
+       cleanup at exit.
+
+       Incremented by the -v option. Set by the PYTHONVERBOSE environment
+       variable. If set to -1 (default), inherit Py_VerboseFlag value. */
+    int verbose;
+```
+
+在`Python/initconfig.c`中，建立了从环境变量和运行时命令行标志读取设置的逻辑。
+
+在`config_read_env_vars`函数中，读取环境变量并将其用于分配配置设置的值：
+
+```cpp
+static PyStatus
+config_read_env_vars(PyConfig *config)
+{
+    PyStatus status;
+    int use_env = config->use_environment;
+
+    /* Get environment variables */
+    _Py_get_env_flag(use_env, &config->parser_debug, "PYTHONDEBUG");
+    _Py_get_env_flag(use_env, &config->verbose, "PYTHONVERBOSE");
+    _Py_get_env_flag(use_env, &config->optimization_level, "PYTHONOPTIMIZE");
+    _Py_get_env_flag(use_env, &config->inspect, "PYTHONINSPECT");
+```
+
+对于详细设置，可以看到使用的值PYTHONVERBOSE来设置的值（&config->verbose如果PYTHONVERBOSE找到）。如果环境变量不存在，-1则将保留默认值。
+
+然后在`config_parse_cmdline`内再次调用`initconfig.c`，命令行标志用于设置的值，如果提供的话：
+
+```cpp
+config_parse_cmdline(PyConfig *config, PyWideStringList *warnoptions,
+                     Py_ssize_t *opt_index)
+{
+...
+
+        switch (c) {
+...
+
+        case 'v':
+            config->verbose++;
+            break;
+...
+        /* This space reserved for other options */
+
+        default:
+            /* unknown argument: parsing failed */
+            config_usage(1, program);
+            return _PyStatus_EXIT(2);
+        }
+    } while (1);
+```
+
+`Py_VerboseFlag`值随后会通过`_Py_GetGlobalVariablesAsDict`函数复制到全局变量。
+
+在Python会话中，可以使用`sys.flags`命名的元组访问运行时标志，例如**详细模式**，**安静模式**。这些`-X`标志在`sys._xoptions`字典中都可用：
+
+```py
+$ ./python.exe -X dev -q       
+
+>>> import sys
+>>> sys.flags
+sys.flags(debug=0, inspect=0, interactive=0, optimize=0, dont_write_bytecode=0, 
+ no_user_site=0, no_site=0, ignore_environment=0, verbose=0, bytes_warning=0, 
+ quiet=1, hash_randomization=1, isolated=0, dev_mode=True, utf8_mode=0)
+
+>>> sys._xoptions
+{'dev': True}
+```
+
+除了中的运行时配置`initconfig.h`外，还有构建配置，该配置位于`pyconfig.h`根文件夹的内部。该文件是`configure`在构建过程中的步骤中动态创建的，或者是由Visual Studio for Windows系统创建的。
+
+可以通过运行以下命令查看构建配置:
+
+```sh
+$ ./python.exe -m sysconfig
+```
+
+#### 读取文件/输入
+
+一旦CPython具有运行时配置和命令行参数，它就可以确定需要执行的内容。
+
+此任务由`pymain_main`内部的函数处理`Modules/main.c`。根据新创建的config实例，CPython现在将执行通过多个选项提供的代码。
+
+* 通过输入 `-c`。最简单的方法是为CPython提供带-c选项的命令和引号内的Python程序。
+
+<div align=center>
+<img src="../img/cpython-c.webp">
+</div>
+
+首先，该`pymain_run_command()`函数在内部使用C类型的`Modules/main.c`传入-c参数作为参数来执行`wchar_t*`。该`wchar_t*`类型通常用作跨CPython的Unicode数据的低级存储类型，因为该类型的大小可以存储UTF8字符。
+
+将转换`wchar_t*`为Python字符串时，该`Objects/unicodeobject.c`文件具有一个辅助函数`PyUnicode_FromWideChar()`，该函数返回PyObject类型为的str。然后，通过`PyUnicode_AsUTF8String()`在`Python str`对象上完成对UTF8的编码，将其转换为`Python bytes`对象。
+
+完成此操作后，`pymain_run_command()`将Python字节对象传递`PyRun_SimpleStringFlags()`给执行，但首先将再次转换bytes为str类型：
+
+```cpp
+static int
+pymain_run_command(wchar_t *command, PyCompilerFlags *cf)
+{
+    PyObject *unicode, *bytes;
+    int ret;
+
+    unicode = PyUnicode_FromWideChar(command, -1);
+    if (unicode == NULL) {
+        goto error;
+    }
+
+    if (PySys_Audit("cpython.run_command", "O", unicode) < 0) {
+        return pymain_exit_err_print();
+    }
+
+    bytes = PyUnicode_AsUTF8String(unicode);
+    Py_DECREF(unicode);
+    if (bytes == NULL) {
+        goto error;
+    }
+
+    ret = PyRun_SimpleStringFlags(PyBytes_AsString(bytes), cf);
+    Py_DECREF(bytes);
+    return (ret != 0);
+
+error:
+    PySys_WriteStderr("Unable to decode the command from the command line:\n");
+    return pymain_exit_err_print();
+}
+```
+
+wchar_t*到Unicode，字节和字符串的转换大致等效于以下内容：
+
+```py
+unicode = str(command)
+bytes_ = bytes(unicode.encode('utf8'))
+# call PyRun_SimpleStringFlags with bytes_
+```
+
+该`PyRun_SimpleStringFlags()`函数是`Python/pythonrun.c`的一部分。目的是将这个简单的命令转换成Python模块，然后将其发送执行。由于需要将Python模块__main__作为独立模块执行，因此它会自动创建该模块：
+
+```cpp
+int
+PyRun_SimpleStringFlags(const char *command, PyCompilerFlags *flags)
+{
+    PyObject *m, *d, *v;
+    m = PyImport_AddModule("__main__");
+    if (m == NULL)
+        return -1;
+    d = PyModule_GetDict(m);
+    v = PyRun_StringFlags(command, Py_file_input, d, d, flags);
+    if (v == NULL) {
+        PyErr_Print();
+        return -1;
+    }
+    Py_DECREF(v);
+    return 0;
+}
+```
+
+一旦`PyRun_SimpleStringFlags()`创建了一个模块和一个字典，它调用`PyRun_StringFlags()`，它创建了一个假的文件名，然后调用Python的解析器创建字符串的**抽象语法树AST**，并返回一个模块，mod：
+
+```cpp
+PyObject *
+PyRun_StringFlags(const char *str, int start, PyObject *globals,
+                  PyObject *locals, PyCompilerFlags *flags)
+{
+...
+    mod = PyParser_ASTFromStringObject(str, filename, start, flags, arena);
+    if (mod != NULL)
+        ret = run_mod(mod, filename, globals, locals, flags, arena);
+    PyArena_Free(arena);
+    return ret;
+```
+
+#### 通过输入 -m
+
+执行Python命令的另一种方法是使用-m带有模块名称的选项。一个典型的示例是`python -m unittest`在标准库中运行`unittest`模块。
+
+最初在PEP 338中提出了能够以脚本的形式执行模块，然后在PEP366中定义了显式相对导入的标准。
+
+使用该`-m`标志意味着在模块包中，想执行`inside`内的任何内容`__main__`。这也意味着要搜索`sys.path`命名模块。
+
+这种搜索机制就是无需记住`unittest`模块在文件系统上存储位置的原因。
+
+在`Modules/main.c`命令行中使用`-m`标志运行命令行时，内部会调用一个函数。模块的名称作为modname参数传递。
+
+然后，CPython将导入一个标准库模块，并使用`runpy`来执行`PyObject_Call()`。导入是使用文件中`Python/import.c`的C API函数`PyImport_ImportModule()`完成的：
+
+```cpp
+static int
+pymain_run_module(const wchar_t *modname, int set_argv0)
+{
+    PyObject *module, *runpy, *runmodule, *runargs, *result;
+    runpy = PyImport_ImportModule("runpy");
+ ...
+    runmodule = PyObject_GetAttrString(runpy, "_run_module_as_main");
+ ...
+    module = PyUnicode_FromWideChar(modname, wcslen(modname));
+ ...
+    runargs = Py_BuildValue("(Oi)", module, set_argv0);
+ ...
+    result = PyObject_Call(runmodule, runargs, NULL);
+ ...
+    if (result == NULL) {
+        return pymain_exit_err_print();
+    }
+    Py_DECREF(result);
+    return 0;
+}
+```
+
+在此函数中，还将看到其他2个C API函数：`PyObject_Call()`和`PyObject_GetAttrString()`。由于`PyImport_ImportModule()`返回的是核心对象类型`PyObject*`，因此需要调用特殊函数以获取属性并对其进行调用。
+
+在Python中，如果您有一个对象并想要获取属性，则可以调用getattr()。在C API中，此调用为`PyObject_GetAttrString()`，可在中找到`Objects/object.c`。如果要运行可调用对象，可以给它加上括号，也可以使用`__call__()`在任何Python对象上运行该属性。该`__call__()`方法在内部实现`Objects/object.c`：
+
+```py
+hi = "hi!"
+hi.upper() == hi.upper.__call__()  # this is the same
+```
+
+该runpy模块使用纯Python编写，位于中Lib/runpy.py。
+
+执行`python -m <module>`等同于运行`python -m runpy <module>`。所述`runpy模块`的建立是为了抽象定位和操作系统上执行的模块的过程。
+
+runpy 做一些事情来运行目标模块：
+
+* 调用__import__()提供的模块名称
+* 将__name__（模块名称）设置为一个名为__main__
+* 执行__main__名称空间中的模块
+
+该runpy模块还支持执行目录和zip文件。
+
+#### 通过文件名输入
+
+如果的第一个参数python是文件名，例如`python test.py`，则CPython将打开一个文件句柄，类似于Python中的用法`open()`，并将该句柄传递给文件`Python/pythonrun.c`中的`PyRun_SimpleFileExFlags()`函数。
+
+* 如果文件路径是`.pyc`文件，它将调用`run_pyc_file()`。
+* 如果文件路径是脚本文件`（.py）`，它将运行`PyRun_FileExFlags()`。
+* 如果文件路径是stdin由于用户运行而来，command | python则将其stdin视为文件句柄并运行PyRun_FileExFlags()。
+
+```cpp
+PyRun_SimpleFileExFlags(FILE *fp, const char *filename, int closeit,
+                        PyCompilerFlags *flags)
+{
+ ...
+    m = PyImport_AddModule("__main__");
+ ...
+    if (maybe_pyc_file(fp, filename, ext, closeit)) {
+ ...
+        v = run_pyc_file(pyc_fp, filename, d, d, flags);
+    } else {
+        /* When running from stdin, leave __main__.__loader__ alone */
+        if (strcmp(filename, "<stdin>") != 0 &&
+            set_main_loader(d, filename, "SourceFileLoader") < 0) {
+            fprintf(stderr, "python: failed to set __main__.__loader__\n");
+            ret = -1;
+            goto done;
+        }
+        v = PyRun_FileExFlags(fp, filename, Py_file_input, d, d,
+                              closeit, flags);
+    }
+ ...
+    return ret;
+}
+```
+
+#### 通过文件输入 `PyRun_FileExFlags()`
+
+对于stdin和基本脚本文件，CPython会将文件句柄传递给位于`pythonrun.c`文件中的`PyRun_FileExFlags()`函数。
+
+函数`PyRun_FileExFlags()`的目是类似于`PyRun_SimpleStringFlags()`用于`-c`输入。CPython会将文件句柄加载到`PyParser_ASTFromFileObject()`中。在下一部分中，将介绍解析器和AST模块。因为这是一个完整的脚本，所以不需要`PyImport_AddModule("__main__")`;使用`-c`如以下步骤：
+
+```cpp
+PyObject *
+PyRun_FileExFlags(FILE *fp, const char *filename_str, int start, PyObject *globals,
+                  PyObject *locals, int closeit, PyCompilerFlags *flags)
+{
+ ...
+    mod = PyParser_ASTFromFileObject(fp, filename, NULL, start, 0, 0,
+                                     flags, NULL, arena);
+ ...
+    ret = run_mod(mod, filename, globals, locals, flags, arena);
+}
+```
+
+与函数`PyRun_SimpleStringFlags()`相同，一旦函数`PyRun_FileExFlags()`从文件创建了Python模块，它就会将其发送`run_mod()`执行。
+
+文件`Python/pythonrun.c`中的`run_mod()`将模块发送到AST，以编译为代码对象。代码对象是一种用于存储字节码操作的格式以及`.pyc`文件中保留的格式：
+
+```cpp
+static PyObject *
+run_mod(mod_ty mod, PyObject *filename, PyObject *globals, PyObject *locals,
+            PyCompilerFlags *flags, PyArena *arena)
+{
+    PyCodeObject *co;
+    PyObject *v;
+    co = PyAST_CompileObject(mod, filename, flags, -1, arena);
+    if (co == NULL)
+        return NULL;
+
+    if (PySys_Audit("exec", "O", co) < 0) {
+        Py_DECREF(co);
+        return NULL;
+    }
+
+    v = run_eval_code_obj(co, globals, locals);
+    Py_DECREF(co);
+    return v;
+}
+```
+
+#### `通过编译后的字节码输入 run_pyc_file()`
+
+在其中，`PyRun_SimpleFileExFlags()`有一个子句供用户提供文件的文件路径`.pyc`。如果文件路径以结尾`.pyc`，则将假定该`.pyc`文件包含写入磁盘的代码对象，而不是将文件作为纯文本文件加载并进行解析。
+
+然后，内部函数`run_pyc_file()`使用文件句柄`Python/pythonrun.c`从`.pyc`文件中封送代码对象。**封送处理**是一个技术术语，用于将文件的内容复制到内存中并将其转换为特定的数据结构。磁盘上的代码对象数据结构是CPython编译器缓存已编译代码的方式，因此不需要在每次调用脚本时都对其进行解析：
+
+```cpp
+static PyObject *
+run_pyc_file(FILE *fp, const char *filename, PyObject *globals,
+             PyObject *locals, PyCompilerFlags *flags)
+{
+    PyCodeObject *co;
+    PyObject *v;
+  ...
+    v = PyMarshal_ReadLastObjectFromFile(fp);
+  ...
+    if (v == NULL || !PyCode_Check(v)) {
+        Py_XDECREF(v);
+        PyErr_SetString(PyExc_RuntimeError,
+                   "Bad code object in .pyc file");
+        goto error;
+    }
+    fclose(fp);
+    co = (PyCodeObject *)v;
+    v = run_eval_code_obj(co, globals, locals);
+    if (v && flags)
+        flags->cf_flags |= (co->co_flags & PyCF_MASK);
+    Py_DECREF(co);
+    return v;
+}
+```
+
+将代码对象编组到内存后，将其发送到`Python/ceval.c`中的函数`run_eval_code_obj()`以执行代码。
+
+在阅读和执行Python文件的探索中，深入探讨了解析器(parser)和AST模块，并调用了`PyParser_ASTFromFileObject()`函数。`PyParser_ASTFromFileObject()`函数将采用文件句柄，编译器标志和`PyAren`a实例，然后使用`PyParser_ParseFileObject()`函数将文件对象转换为节点对象。
+
+使用node对象，它将使用AST函数将其转换为模块`PyAST_FromNodeObject()`：
+
+```cpp
+mod_ty
+PyParser_ASTFromFileObject(FILE *fp, PyObject *filename, const char* enc,
+                           int start, const char *ps1,
+                           const char *ps2, PyCompilerFlags *flags, int *errcode,
+                           PyArena *arena)
+{
+    ...
+    node *n = PyParser_ParseFileObject(fp, filename, enc,
+                                       &_PyParser_Grammar,
+                                       start, ps1, ps2, &err, &iflags);
+    ...
+    if (n) {
+        flags->cf_flags |= iflags & PyCF_MASK;
+        mod = PyAST_FromNodeObject(n, flags, filename, arena);
+        PyNode_Free(n);
+    ...
+    return mod;
+}
+```
+
+因为`PyParser_ParseFileObject`函数，接下来切换到`Parser/parsetok.c`中的parser-tokenizer阶段。此功能有两个重要任务：
+
+* 使用`PyTokenizer_FromFile()`中的`Parser/tokenizer.c`实例化标记程序状态`tok_state`
+* 具体的解析树的清单（node使用）使用`Parser/parsetok.c`中的`parsetok()`解析词素
+
+```cpp
+node *
+PyParser_ParseFileObject(FILE *fp, PyObject *filename,
+                         const char *enc, grammar *g, int start,
+                         const char *ps1, const char *ps2,
+                         perrdetail *err_ret, int *flags)
+{
+    struct tok_state *tok;
+...
+    if ((tok = PyTokenizer_FromFile(fp, enc, ps1, ps2)) == NULL) {
+        err_ret->error = E_NOMEM;
+        return NULL;
+    }
+...
+    return parsetok(tok, g, start, err_ret, flags);
+}
+```
+
+在`Parser/tokenizer.h`中定义的`tok_state`是用于存储词法生成器生成的所有临时数据的数据结构。作为`parsetok()`开发具体语法树所需的数据结构，它将返回词法器到解析器。
+
+在函数`parsetok()`内部，使用`tok_state`结构并在循环中调用`tok_get()`，直到文件用尽且找不到更多`token`为止。
+
+在`Parser/tokenizer.c`中定义的`tok_get()`行为类似于迭代器。它将持续返回解析树中的下一个标记。
+
+`tok_get()`是整个CPython代码库中最复杂的函数之一。它有640种情况，包括数十年的传统，边沿案例，新的语言功能和语法。
+
+一个简单的示例就是将换行符转换为`NEWLINE`词素的部分：
+
+```cpp
+static int
+tok_get(struct tok_state *tok, char **p_start, char **p_end)
+{
+...
+    /* Newline */
+    if (c == '\n') {
+        tok->atbol = 1;
+        if (blankline || tok->level > 0) {
+            goto nextline;
+        }
+        *p_start = tok->start;
+        *p_end = tok->cur - 1; /* Leave '\n' out of the string */
+        tok->cont_line = 0;
+        if (tok->async_def) {
+            /* We're somewhere inside an 'async def' function, and
+               we've encountered a NEWLINE after its signature. */
+            tok->async_def_nl = 1;
+        }
+        return NEWLINE;
+    }
+...
+}
+```
+
+在这种情况下，`NEWLINE`是词素token，其值在文件`Include/token.h`中定义。所有标记都是常int量值，并且`Include/token.h`文件是运行`make regen-grammar`指令生成的。
+
+函数`PyParser_ParseFileObject()`返回的`node`类型对于下一阶段至关重要，它将解析树（CST）转换为抽象语法树（AST）：
+
+```cpp
+typedef struct _node {
+    short               n_type;
+    char                *n_str;
+    int                 n_lineno;
+    int                 n_col_offset;
+    int                 n_nchildren;
+    struct _node        *n_child;
+    int                 n_end_lineno;
+    int                 n_end_col_offset;
+} node;
+```
+
+由于CST是语法，词素ID和符号的树，因此编译器将很难基于Python语言做出快速决策。
+
+这就是为什么下一步是将CST转换为AST（一种更高级别的结构）的原因。该任务由`Python/ast.c`具有C和Python API 的模块执行。
+在跳到AST之前，有一种方法可以访问解析器阶段的输出。CPython具有一个标准的库模块parser，该模块使用Python API公开C函数。
+该模块记录为CPython的实现细节，因此您不会在其他Python解释器中看到它。同样，函数的输出也不是那么容易阅读。
+输出将采用数字形式，使用make regen-grammar阶段生成的词素和符号，存储在`Include/token.h`：
+
+```py
+>>> from pprint import pprint
+>>> import parser
+>>> st = parser.expr('a + 1')
+>>> pprint(parser.st2list(st))
+[258,
+ [332,
+  [306,
+   [310,
+    [311,
+     [312,
+      [313,
+       [316,
+        [317,
+         [318,
+          [319,
+           [320,
+            [321, [322, [323, [324, [325, [1, 'a']]]]]],
+            [14, '+'],
+            [321, [322, [323, [324, [325, [2, '1']]]]]]]]]]]]]]]]],
+ [4, ''],
+ [0, '']]
+```
+
+为了更容易理解，可以将symbol和token模块中的所有数字放入字典中，然后parser.st2list()用名称递归替换输出中的值：
+
+```py
+import symbol
+import token
+import parser
+
+def lex(expression):
+    symbols = {v: k for k, v in symbol.__dict__.items() if isinstance(v, int)}
+    tokens = {v: k for k, v in token.__dict__.items() if isinstance(v, int)}
+    lexicon = {**symbols, **tokens}
+    st = parser.expr(expression)
+    st_list = parser.st2list(st)
+
+    def replace(l: list):
+        r = []
+        for i in l:
+            if isinstance(i, list):
+                r.append(replace(i))
+            else:
+                if i in lexicon:
+                    r.append(lexicon[i])
+                else:
+                    r.append(i)
+        return r
+
+    return replace(st_list)
+```
+
+可以lex()使用一个简单的表达式来运行，例如a + 1看它如何被表示为解析树：
+
+```py
+>>> from pprint import pprint
+>>> pprint(lex('a + 1'))
+
+['eval_input',
+ ['testlist',
+  ['test',
+   ['or_test',
+    ['and_test',
+     ['not_test',
+      ['comparison',
+       ['expr',
+        ['xor_expr',
+         ['and_expr',
+          ['shift_expr',
+           ['arith_expr',
+            ['term',
+             ['factor', ['power', ['atom_expr', ['atom', ['NAME', 'a']]]]]],
+            ['PLUS', '+'],
+            ['term',
+             ['factor',
+              ['power', ['atom_expr', ['atom', ['NUMBER', '1']]]]]]]]]]]]]]]]],
+ ['NEWLINE', ''],
+ ['ENDMARKER', '']]
+```
+
+### 抽象语法树AST
 
 

@@ -34,10 +34,10 @@ start:$(OBJS)
 #执行make clean指令
 .PHONY:clean
 clean:
-		-@$(RM) $(OBJS)
+	-@$(RM) $(OBJS)
         #执行make clean指令时，需要执行的操作，比如下面的指令时指删除所有.o文件
 run:
 	./$(EXEC)
 cleanimg:
-		-@$(RM) ./img/_*
+	-@$(RM) ./img/._*.*
 
