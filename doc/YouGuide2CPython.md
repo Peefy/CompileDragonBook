@@ -416,4 +416,40 @@ CPython的标准库带有一个Python模块
 
 ## 第2部分：Python解释程序
 
+python可以通过五种方式调用二进制文件：
+
+* 与-c和python命令一起运行单个命令
+* 使用-m和模块名称启动模块
+* 使用文件名运行文件
+* stdin使用外壳管道运行输入
+* 要启动REPL并一次执行一个命令
+
+需要检查以查看此过程的三个源文件：
+
+* Programs/python.c 是一个简单的入口点。
+* Modules/main.c 包含用于汇总整个过程，加载配置，执行代码和清理内存的代码。
+* Python/initconfig.c 从系统环境中加载配置，并将其与任何命令行标志合并。
+
+下图显示了这些函数中的每一个的调用方式：
+
+<div align=center>
+<img src="../img/cpython.webp">
+</div>
+
+CPython源代码样式：
+
+* 对于公共功能，请使用前缀Py，对于静态功能，请不要使用前缀。该Py_前缀保留给诸如之类的全局服务例程使用Py_FatalError。特定的例程组（例如特定的对象类型API）使用更长的前缀，例如PyString_用于字符串函数。
+* 公共函数和变量使用混合词用下划线，如：PyObject_GetAttr，Py_BuildValue，PyExc_TypeError。
+* 有时，加载程序必须看到“内部”功能。我们_Py为此使用前缀，例如_PyObject_Dump。
+* 宏应该有一个混合词的前缀，然后用大写，例如PyString_AS_STRING，Py_PRINT_RAW。
+
+可以看到在执行任何Python代码之前，运行时首先会建立配置。运行时的配置是在Include/cpython/initconfig.hnamed中定义的数据结构PyConfig。配置数据结构包括以下内容：
+
+* 各种模式的运行时标志，例如调试和优化模式
+* 提供了执行模式，例如是否传递文件名stdin或模块名称
+* 扩展选项，由 `-X <option>`
+* 运行时设置的环境变量
+
+配置数据主要由CPython运行时用来启用和禁用各种功能。
+
 
