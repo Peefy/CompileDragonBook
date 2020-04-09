@@ -1014,4 +1014,216 @@ def lex(expression):
 
 ### 抽象语法树AST
 
+CPython解释器的下一步是将解析器生成的**CST**转换为可以执行的更具逻辑性的东西。该结构是代码的高层表示，称为**抽象语法树（AST）**。AST是通过CPython解释器过程内联生成的，但是也可以使用Python的标准库ast模块以及通过C API 在Python中生成它们。
+
+另外，通过instaviz库，可以在Web UI中显示AST和字节码指令。
+
+```sh
+$ pip install instaviz
+```
+
+通过python不带参数的命令行运行来打开REPL ：
+
+```python
+>>> import instaviz
+>>> def example():
+       a = 1
+       b = a + 1
+       return b
+
+>>> instaviz.show(example)
+```
+
+会在命令行上看到一条通知，指出Web服务器已在port上启动8080。如果将该端口用于其他用途，则可以通过调用`instaviz.show(example, port=9090)`或其他端口号进行更改。
+
+在网络浏览器中，可以看到instaviz功能的详细分类：左下图是在REPL中声明的函数，表示为抽象语法树。树中的每个节点都是AST类型。它们位于ast模块中，并且都继承自_ast.AST。与CST不同，某些节点具有将它们链接到子节点的属性，而CST具有通用的子节点属性。
+
+"分配"节点具有两个属性：
+
+* **targets**是要分配的名称的列表。这是一个列表，因为您可以使用拆包使用单个表达式将其分配给多个变量
+* **value**是要分配的值，在这种情况下为BinOp语句a + 1。
+
+如果单击该BinOp语句，将显示相关属性：
+
+* **left**：运算符左侧的节点
+* **op**：运算符，在这种情况下，是要添加的Add节点（+）
+* **right**：运算符右边的节点
+
+用C语言编译AST并不是一件容易的事，因为`Python/ast.c`模块超过5000行代码。
+
+有几个入口点，构成AST的公共API的一部分。在**词法分析器**和**语法分析器**的最后一部分中，到达时`PyAST_FromNodeObject()`的调用已停止。在这一阶段，Python解释器进程已经以`node *树`的形式创建了一个CST 。
+
+然后转入`Python/ast.c`中的`PyAST_FromNodeObject()`内部，将会看到它收到`node *树`，`文件名`，`编译器标志`和`PyArena`。
+
+此函数的返回类型`mod_ty`在`Include/Python-ast.h`中定义。`mod_ty`是Python 5种模块类型之一的容器结构：
+
+* **Module**
+* **Interactive**
+* **Expression**
+* **FunctionType**
+* **Suite**
+
+在`Include/Python-ast.h`中，可以看到`Expression`类型需要一个`field body`，它是一个`expr_ty`类型。`expr_ty`类型也定义在`Include/Python-ast.h`中：
+
+```cpp
+enum _mod_kind {Module_kind=1, Interactive_kind=2, Expression_kind=3,
+                 FunctionType_kind=4, Suite_kind=5};
+struct _mod {
+    enum _mod_kind kind;
+    union {
+        struct {
+            asdl_seq *body;
+            asdl_seq *type_ignores;
+        } Module;
+
+        struct {
+            asdl_seq *body;
+        } Interactive;
+
+        struct {
+            expr_ty body;
+        } Expression;
+
+        struct {
+            asdl_seq *argtypes;
+            expr_ty returns;
+        } FunctionType;
+
+        struct {
+            asdl_seq *body;
+        } Suite;
+
+    } v;
+};
+```
+
+AST类型都在中`Parser/Python.asdl`列出，将看到所有列出的**模块类型**，**语句类型**，**表达式类型**，**运算符**和**理解**。本文档中的类型名称与AST生成的类以及ast标准模块库中命名的相同类有关。
+
+`Include/Python-ast.h`中的参数和名称与在`Parser/Python.asdl`中指定的参数和名称直接相关：
+
+```txt
+-- ASDL's 5 builtin types are:
+-- identifier, int, string, object, constant
+
+module Python
+{
+    mod = Module(stmt* body, type_ignore *type_ignores)
+        | Interactive(stmt* body)
+        | Expression(expr body)
+        | FunctionType(expr* argtypes, expr returns)
+```
+
+因此`Python/ast.c`程序可以使用指向相关数据的指针快速生成结构。
+
+从`PyAST_FromNodeObject()`可以看到，它实质上是switch的结果的声明`TYPE(n)`。`TYPE()`是AST用来确定具体语法树中节点的类型的核心功能之一。`PyAST_FromNodeObject()`只是返回树中的第一个节点，所以它只能被定义为一下模块类型之一`Module`，`Interactive`，`Expression`，`FunctionType`。另外，`TYPE()`的结果将是`symbol`或`token`类型，
+
+对于`file_input`，结果应该是`Module`。模块是一系列语句，其中有几种类型。遍历子n节点并创建语句节点的逻辑在内部`ast_for_stmt()`。如果模块中只有1个语句，则一次调用此函数；如果有多个语句，则在循环中调用此函数。所产生的`Module`然后用退回`PyArena`。
+
+因为`eval_input`的结果应该是`Expression`。来自的结果（CHILD(n ,0)是的第一个子项n）传递给`ast_for_testlist()`，返回一个`expr_ty`类型。`expr_ty`与`PyArena`一起发送到`Expression()`创建表达式节点，然后作为结果传递回：
+
+```cpp
+mod_ty
+PyAST_FromNodeObject(const node *n, PyCompilerFlags *flags,
+                     PyObject *filename, PyArena *arena)
+{
+    ...
+    switch (TYPE(n)) {
+        case file_input:
+            stmts = _Py_asdl_seq_new(num_stmts(n), arena);
+            if (!stmts)
+                goto out;
+            for (i = 0; i < NCH(n) - 1; i++) {
+                ch = CHILD(n, i);
+                if (TYPE(ch) == NEWLINE)
+                    continue;
+                REQ(ch, stmt);
+                num = num_stmts(ch);
+                if (num == 1) {
+                    s = ast_for_stmt(&c, ch);
+                    if (!s)
+                        goto out;
+                    asdl_seq_SET(stmts, k++, s);
+                }
+                else {
+                    ch = CHILD(ch, 0);
+                    REQ(ch, simple_stmt);
+                    for (j = 0; j < num; j++) {
+                        s = ast_for_stmt(&c, CHILD(ch, j * 2));
+                        if (!s)
+                            goto out;
+                        asdl_seq_SET(stmts, k++, s);
+                    }
+                }
+            }
+
+            /* Type ignores are stored under the ENDMARKER in file_input. */
+            ...
+
+            res = Module(stmts, type_ignores, arena);
+            break;
+        case eval_input: {
+            expr_ty testlist_ast;
+
+            /* XXX Why not comp_for here? */
+            testlist_ast = ast_for_testlist(&c, CHILD(n, 0));
+            if (!testlist_ast)
+                goto out;
+            res = Expression(testlist_ast, arena);
+            break;
+        }
+        case single_input:
+            ...
+            break;
+        case func_type_input:
+            ...
+        ...
+    return res;
+}
+```
+
+在`ast_for_stmt()`函数内部`switch`，每种可能的语句类型（`simple_stmt`，`compound_stmt`等等）还有另一条语句，以及确定节点类参数的代码。
+
+一个简单的函数用于幂表达式，即`2**4`等于2的4次方。此函数首先获取`ast_for_atom_expr()`，`2`是示例中的数字，然后如果有一个子代，则返回原子表达式。如果它有多个孩子，它将获得右手（数字`4`）并返回一个BinOp（二进制运算），运算符为Pow（power），左手为e（2），右手为f（4） ：
+
+```cpp
+static expr_ty
+ast_for_power(struct compiling *c, const node *n)
+{
+    /* power: atom trailer* ('**' factor)*
+     */
+    expr_ty e;
+    REQ(n, power);
+    e = ast_for_atom_expr(c, CHILD(n, 0));
+    if (!e)
+        return NULL;
+    if (NCH(n) == 1)
+        return e;
+    if (TYPE(CHILD(n, NCH(n) - 1)) == factor) {
+        expr_ty f = ast_for_expr(c, CHILD(n, NCH(n) - 1));
+        if (!f)
+            return NULL;
+        e = BinOp(e, Pow, f, LINENO(n), n->n_col_offset,
+                  n->n_end_lineno, n->n_end_col_offset, c->c_arena);
+    }
+    return e;
+}
+```
+
+如果将简短函数传递给instaviz模块，则可以看到此结果：
+
+```py
+>>> def foo():
+       2**4
+>>> import instaviz
+>>> instaviz.show(foo)
+```
+
+每种语句类型和表达式都有`ast_for_*()`创建它的相应功能。参数在标准库`Parser/Python.asdl`中的ast模块中定义并通过模块公开。如果表达式或语句具有优先级，则它将`ast_for_*`在深度优先遍历中调用相应的优先级函数。
+
+### 第2部分 小结
+
+CPython的多功能性和低级执行API使其成为嵌入式脚本引擎的理想选择。CPython运行之前可以加载很多配置，并能够通过5种方式解释程序，比如`*.py`和`*.pyc`等，并通过词法分析和语法分析构建CST和AST。
+
+## 第3部分：CPython编译器和执行循环
+
 
