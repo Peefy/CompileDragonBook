@@ -2328,7 +2328,7 @@ eval('"-".join([letter for letter in "hello"])')
 
 想到值堆栈的一种方式就像是一个木制的钉子，可以在上面堆放油缸。一次只能添加或删除一项。这是使用`PUSH(a)`宏完成的，其中a是指向的指针PyObject。
 
-例如，如果您创建了一个PyLong值为10的a 并将其推入值堆栈：
+例如，如果创建了一个PyLong值为10的a 并将其推入值堆栈：
 
 ```cpp
 PyObject *a = PyLong_FromLong(10);
@@ -2469,3 +2469,36 @@ Traceback (most recent call last):
 RuntimeError
 ```
 
+在`traceback.py`中，`walk_stack()`用于打印回溯的功能：
+
+```py
+def walk_stack(f):
+    """Walk a stack yielding the frame and line number for each frame.
+
+    This will follow f.f_back from the given frame. If no frame is given, the
+    current stack is used. Usually used with StackSummary.extract.
+    """
+    if f is None:
+        f = sys._getframe().f_back.f_back
+    while f is not None:
+        yield f, f.f_lineno
+        f = f.f_back
+```
+
+在这里，可以看到通过调用获取的当前帧，并且`sys._getframe()`将父级的父级设置为该帧，因为不希望看到对追溯的调用`walk_stack()`或`print_trace()`回溯，因此将跳过这些功能帧。
+
+然后将`f_back`指针移到顶部。
+
+`sys._getframe()`是获取frame当前线程属性的Python API 。
+
+这是该框架堆栈的外观，每个框架有3个框架，每个框架都有其代码对象和一个指向当前框架的线程状态：
+
+### 第3部分 小结
+
+在本部分中，探索了CPython最复杂的元素：编译器。Python的原始作者Guido van Rossum声明CPython的编译器应该“笨拙”，以便人们可以理解。
+
+通过将编译过程分解为逻辑上的细小步骤，它很容易理解。
+
+## 第4部分：CPython中的对象
+
+CPython附带了一些基本类型，例如**字符串**，**列表**，**元组**，**字典**和**对象**。
