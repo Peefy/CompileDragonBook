@@ -57,9 +57,9 @@ cpython/
 
 ### 编译CPython（macOS）
 
-在macOS上编译CPython很简单。您首先需要基本的C编译器工具包。命令行开发工具是一个应用程序，您可以在macOS中通过App Store更新。您需要在终端上执行初始安装。
+在macOS上编译CPython很简单。传递首先需要基本的C编译器工具包。命令行开发工具是一个应用程序，传递可以在macOS中通过App Store更新。传递需要在终端上执行初始安装。
 
-要在macOS中打开终端，请转到启动板，然后单击“ 其他”，然后选择“ 终端”应用。您将需要将此应用程序保存到Dock中，因此，右键单击Icon并选择Keep in Dock。
+要在macOS中打开终端，请转到启动板，然后单击“ 其他”，然后选择“ 终端”应用。传递将需要将此应用程序保存到Dock中，因此，右键单击Icon并选择Keep in Dock。
 
 现在，在终端中，通过运行以下命令安装C编译器和工具包：
 
@@ -98,13 +98,13 @@ $ brew install openssl xz zlib
 
 选择编译器时要做出的一个重要决定是系统可移植性要求。Java和.NET CLR将被编译成一种中间语言，从而使编译后的代码可跨多个系统体系结构移植。C，Go，C ++和Pascal将编译为一个低级可执行文件，该可执行文件仅在与其编译的系统相似的系统上工作。
 
-因为Python应用程序通常作为源代码分发，所以Python运行时的作用是转换Python源代码并一步执行它。在内部，CPython运行时会编译您的代码。一个普遍的误解是Python是一种解释语言。它实际上是编译的。
+因为Python应用程序通常作为源代码分发，所以Python运行时的作用是转换Python源代码并一步执行它。在内部，CPython运行时会编译传递的代码。一个普遍的误解是Python是一种解释语言。它实际上是编译的。
 
-Python代码未编译为机器代码。它被编译成一种特殊的低级中间语言，称为字节码，只有CPython才能理解。此代码存储在.pyc隐藏目录中的文件中，并缓存以执行。如果您在不更改源代码的情况下两次运行相同的Python应用程序，那么第二次运行总是会更快。这是因为它会加载已编译的字节码并直接执行。
+Python代码未编译为机器代码。它被编译成一种特殊的低级中间语言，称为字节码，只有CPython才能理解。此代码存储在.pyc隐藏目录中的文件中，并缓存以执行。如果传递在不更改源代码的情况下两次运行相同的Python应用程序，那么第二次运行总是会更快。这是因为它会加载已编译的字节码并直接执行。
 
 CPython中的C是对C编程语言的引用，这意味着此Python发行版是用C语言编写的。CPython中的编译器是用纯C编写的。但是，许多标准库模块是用纯Python编写的，或者是C和Python的组合。
 
-如果要从头开始编写新的编程语言，则需要一个可执行的应用程序来编译您的编译器！您需要一个编译器来执行任何事情，因此，在开发新语言时，通常首先会使用较老的，更成熟的语言编写它们。
+如果要从头开始编写新的编程语言，则需要一个可执行的应用程序来编译传递的编译器！传递需要一个编译器来执行任何事情，因此，在开发新语言时，通常首先会使用较老的，更成熟的语言编写它们。
 
 一个很好的例子是Go编程语言。第一个Go编译器是用C编写的，然后可以对Go进行编译，然后用Go重写了该编译器。
 
@@ -324,7 +324,7 @@ Token NAME/'proceed' ... It's a keyword
   ACCEPT.
 ```
 
-在输出中，您可以看到它突出显示proceed为关键字。在下一章中，我们将看到如何执行Python二进制代码到达词素生成器，以及从那里执行代码的过程。
+在输出中，传递可以看到它突出显示proceed为关键字。在下一章中，将看到如何执行Python二进制代码到达词素生成器，以及从那里执行代码的过程。
 
 ### CPython中的内存管理
 
@@ -412,7 +412,7 @@ CPython的标准库带有一个Python模块
 
 ### 第1部分 小结
 
-在第1部分中，介绍了源代码存储库的结构，如何从源代码进行编译以及Python语言规范。当您入研究Python解释器过程时，这些核心概念对于第二部分至关重要。
+在第1部分中，介绍了源代码存储库的结构，如何从源代码进行编译以及Python语言规范。当传递入研究Python解释器过程时，这些核心概念对于第二部分至关重要。
 
 ## 第2部分：Python解释程序
 
@@ -440,7 +440,7 @@ CPython源代码样式：
 
 * 对于公共功能，请使用前缀Py，对于静态功能，请不要使用前缀。该Py_前缀保留给诸如之类的全局服务例程使用Py_FatalError。特定的例程组（例如特定的对象类型API）使用更长的前缀，例如PyString_用于字符串函数。
 * 公共函数和变量使用混合词用下划线，如：PyObject_GetAttr，Py_BuildValue，PyExc_TypeError。
-* 有时，加载程序必须看到“内部”功能。我们_Py为此使用前缀，例如_PyObject_Dump。
+* 有时，加载程序必须看到“内部”功能。为此使用前缀`_Py`，例如_PyObject_Dump。
 * 宏应该有一个混合词的前缀，然后用大写，例如PyString_AS_STRING，Py_PRINT_RAW。
 
 ### CPython 建立运行时配置
@@ -617,7 +617,7 @@ bytes_ = bytes(unicode.encode('utf8'))
 # call PyRun_SimpleStringFlags with bytes_
 ```
 
-该`PyRun_SimpleStringFlags()`函数是`Python/pythonrun.c`的一部分。目的是将这个简单的命令转换成Python模块，然后将其发送执行。由于需要将Python模块__main__作为独立模块执行，因此它会自动创建该模块：
+该`PyRun_SimpleStringFlags()`函数是`Python/pythonrun.c`的一部分。目的是将这个简单的命令转换成Python模块，然后将其传递执行。由于需要将Python模块__main__作为独立模块执行，因此它会自动创建该模块：
 
 ```cpp
 int
@@ -692,7 +692,7 @@ pymain_run_module(const wchar_t *modname, int set_argv0)
 
 在此函数中，还将看到其他2个C API函数：`PyObject_Call()`和`PyObject_GetAttrString()`。由于`PyImport_ImportModule()`返回的是核心对象类型`PyObject*`，因此需要调用特殊函数以获取属性并对其进行调用。
 
-在Python中，如果您有一个对象并想要获取属性，则可以调用getattr()。在C API中，此调用为`PyObject_GetAttrString()`，可在中找到`Objects/object.c`。如果要运行可调用对象，可以给它加上括号，也可以使用`__call__()`在任何Python对象上运行该属性。该`__call__()`方法在内部实现`Objects/object.c`：
+在Python中，如果传递有一个对象并想要获取属性，则可以调用getattr()。在C API中，此调用为`PyObject_GetAttrString()`，可在中找到`Objects/object.c`。如果要运行可调用对象，可以给它加上括号，也可以使用`__call__()`在任何Python对象上运行该属性。该`__call__()`方法在内部实现`Objects/object.c`：
 
 ```py
 hi = "hi!"
@@ -764,9 +764,9 @@ PyRun_FileExFlags(FILE *fp, const char *filename_str, int start, PyObject *globa
 }
 ```
 
-与函数`PyRun_SimpleStringFlags()`相同，一旦函数`PyRun_FileExFlags()`从文件创建了Python模块，它就会将其发送`run_mod()`执行。
+与函数`PyRun_SimpleStringFlags()`相同，一旦函数`PyRun_FileExFlags()`从文件创建了Python模块，它就会将其传递`run_mod()`执行。
 
-文件`Python/pythonrun.c`中的`run_mod()`将模块发送到AST，以编译为代码对象。代码对象是一种用于存储字节码操作的格式以及`.pyc`文件中保留的格式：
+文件`Python/pythonrun.c`中的`run_mod()`将模块传递到AST，以编译为代码对象。代码对象是一种用于存储字节码操作的格式以及`.pyc`文件中保留的格式：
 
 ```cpp
 static PyObject *
@@ -822,7 +822,7 @@ run_pyc_file(FILE *fp, const char *filename, PyObject *globals,
 }
 ```
 
-将代码对象编组到内存后，将其发送到`Python/ceval.c`中的函数`run_eval_code_obj()`以执行代码。
+将代码对象编组到内存后，将其传递到`Python/ceval.c`中的函数`run_eval_code_obj()`以执行代码。
 
 在阅读和执行Python文件的探索中，深入探讨了解析器(parser)和AST模块，并调用了`PyParser_ASTFromFileObject()`函数。`PyParser_ASTFromFileObject()`函数将采用文件句柄，编译器标志和`PyAren`a实例，然后使用`PyParser_ParseFileObject()`函数将文件对象转换为节点对象。
 
@@ -928,7 +928,7 @@ typedef struct _node {
 
 这就是为什么下一步是将CST转换为AST（一种更高级别的结构）的原因。该任务由`Python/ast.c`具有C和Python API 的模块执行。
 在跳到AST之前，有一种方法可以访问解析器阶段的输出。CPython具有一个标准的库模块parser，该模块使用Python API公开C函数。
-该模块记录为CPython的实现细节，因此您不会在其他Python解释器中看到它。同样，函数的输出也不是那么容易阅读。
+该模块记录为CPython的实现细节，因此传递不会在其他Python解释器中看到它。同样，函数的输出也不是那么容易阅读。
 输出将采用数字形式，使用make regen-grammar阶段生成的词素和符号，存储在`Include/token.h`：
 
 ```py
@@ -1040,7 +1040,7 @@ $ pip install instaviz
 
 "分配"节点具有两个属性：
 
-* **targets**是要分配的名称的列表。这是一个列表，因为您可以使用拆包使用单个表达式将其分配给多个变量
+* **targets**是要分配的名称的列表。这是一个列表，因为传递可以使用拆包使用单个表达式将其分配给多个变量
 * **value**是要分配的值，在这种情况下为BinOp语句a + 1。
 
 如果单击该BinOp语句，将显示相关属性：
@@ -1119,7 +1119,7 @@ module Python
 
 对于`file_input`，结果应该是`Module`。模块是一系列语句，其中有几种类型。遍历子n节点并创建语句节点的逻辑在内部`ast_for_stmt()`。如果模块中只有1个语句，则一次调用此函数；如果有多个语句，则在循环中调用此函数。所产生的`Module`然后用退回`PyArena`。
 
-因为`eval_input`的结果应该是`Expression`。来自的结果（CHILD(n ,0)是的第一个子项n）传递给`ast_for_testlist()`，返回一个`expr_ty`类型。`expr_ty`与`PyArena`一起发送到`Expression()`创建表达式节点，然后作为结果传递回：
+因为`eval_input`的结果应该是`Expression`。来自的结果（CHILD(n ,0)是的第一个子项n）传递给`ast_for_testlist()`，返回一个`expr_ty`类型。`expr_ty`与`PyArena`一起传递到`Expression()`创建表达式节点，然后作为结果传递回：
 
 ```cpp
 mod_ty
@@ -1226,4 +1226,1246 @@ CPython的多功能性和低级执行API使其成为嵌入式脚本引擎的理�
 
 ## 第3部分：CPython编译器和执行循环
 
+在第2部分中，了解了CPython解释器如何获取输入（例如文件或字符串），并将其转换为逻辑抽象语法树AST。但是仍没有到执行此代码的阶段。接下来，必须更深入地将抽象语法树AST转换为CPU可以理解的一组顺序命令。
+
+解释器具有一个AST，具有每个操作符，函数，类和名称空间所需的属性。将AST变成CPU可以理解的东西是编译器的工作。此编译任务分为两部分：
+
+* 遍历树并创建一个**控制流图CFG**，它表示执行的逻辑顺序
+* 将CFG中的节点转换为较小的可执行语句，称为字节码
+
+之前研究了文件的执行方式以及`Python/pythonrun.c`中的`PyRun_FileExFlags()`函数。在此函数内部，将`FILE`句柄转换为`mod_ty`类型的`mod`。该任务由`PyParser_ASTFromFileObject()`依次调用`tokenizer`，`parser-tokenizer`然后调用`AST`：
+
+```cpp
+PyObject *
+PyRun_FileExFlags(FILE *fp, const char *filename_str, int start, PyObject *globals,
+                  PyObject *locals, int closeit, PyCompilerFlags *flags)
+{
+ ...
+    mod = PyParser_ASTFromFileObject(fp, filename, NULL, start, 0, 0,
+ ...
+    ret = run_mod(mod, filename, globals, locals, flags, arena);
+}
+```
+
+得到的结果模块将传递到仍然在`Python/pythonrun.c`中的`run_mod()`。这是一个小函数，其中的`PyCodeObject`从`PyAST_CompileObject()`获取并传递给`run_eval_code_obj()`函数。
+
+```cpp
+static PyObject *
+run_mod(mod_ty mod, PyObject *filename, PyObject *globals, PyObject *locals,
+            PyCompilerFlags *flags, PyArena *arena)
+{
+    PyCodeObject *co;
+    PyObject *v;
+    co = PyAST_CompileObject(mod, filename, flags, -1, arena);
+    if (co == NULL)
+        return NULL;
+
+    if (PySys_Audit("exec", "O", co) < 0) {
+        Py_DECREF(co);
+        return NULL;
+    }
+
+    v = run_eval_code_obj(co, globals, locals);
+    Py_DECREF(co);
+    return v;
+}
+```
+
+`PyAST_CompileObject()`函数是CPython编译器的主要入口点，它以Python模块作为主要参数，以及文件名，全局变量，局部变量以及`PyArena`在解释器过程中较早创建的所有变量。
+
+在编译器启动之前，将创建一个全局编译器状态。此类型在`Python/compile.c`中的`compiler`中定义，并包含编译器用来记住编译器标志，堆栈和`PyArena`的属性。
+
+```cpp
+struct compiler {
+    PyObject *c_filename;
+    struct symtable *c_st;
+    PyFutureFeatures *c_future; /* pointer to module's __future__ */
+    PyCompilerFlags *c_flags;
+
+    int c_optimize;              /* optimization level */
+    int c_interactive;           /* true if in interactive mode */
+    int c_nestlevel;
+    int c_do_not_emit_bytecode;  /* The compiler won't emit any bytecode
+                                    if this value is different from zero.
+                                    This can be used to temporarily visit
+                                    nodes without emitting bytecode to
+                                    check only errors. */
+
+    PyObject *c_const_cache;     /* Python dict holding all constants,
+                                    including names tuple */
+    struct compiler_unit *u; /* compiler state for current block */
+    PyObject *c_stack;           /* Python list holding compiler_unit ptrs */
+    PyArena *c_arena;            /* pointer to memory allocation arena */
+};
+```
+
+在`PyAST_CompileObject()`内部，发生了11个主要步骤：
+
+1. 如果`__doc__`模块不存在，请为其创建一个空属性。
+2. 如果`__annotations__`模块不存在，请为其创建一个空属性。
+3. 将全局编译器状态的文件名设置为`filename`参数。
+4. 将编译器的内存分配区域设置为解释器使用的区域。
+5. 将`__future__`模块中的所有标志复制到编译器中的将来标志。
+6. 合并命令行或环境变量提供的运行时标志。
+7. 启用`__future__`编译器中的所有功能。
+8. 将优化级别设置为提供的参数或默认值。
+9. 从模块对象构建符号表。
+10. 以编译器状态运行编译器并返回代码对象。
+11. 由编译器释放所有分配的内存。
+
+```cpp
+    struct compiler c;
+    PyCodeObject *co = NULL;
+    PyCompilerFlags local_flags = _PyCompilerFlags_INIT;
+    int merged;
+    PyConfig *config = &_PyInterpreterState_GET_UNSAFE()->config;
+
+    if (!__doc__) {
+        __doc__ = PyUnicode_InternFromString("__doc__");
+        if (!__doc__)
+            return NULL;
+    }
+    if (!__annotations__) {
+        __annotations__ = PyUnicode_InternFromString("__annotations__");
+        if (!__annotations__)
+            return NULL;
+    }
+    if (!compiler_init(&c))
+        return NULL;
+    Py_INCREF(filename);
+    c.c_filename = filename;
+    c.c_arena = arena;
+    c.c_future = PyFuture_FromASTObject(mod, filename);
+    if (c.c_future == NULL)
+        goto finally;
+    if (!flags) {
+        flags = &local_flags;
+    }
+    merged = c.c_future->ff_features | flags->cf_flags;
+    c.c_future->ff_features = merged;
+    flags->cf_flags = merged;
+    c.c_flags = flags;
+    c.c_optimize = (optimize == -1) ? config->optimization_level : optimize;
+    c.c_nestlevel = 0;
+    c.c_do_not_emit_bytecode = 0;
+
+    if (!_PyAST_Optimize(mod, arena, c.c_optimize)) {
+        goto finally;
+    }
+
+    c.c_st = PySymtable_BuildObject(mod, filename, c.c_future);
+    if (c.c_st == NULL) {
+        if (!PyErr_Occurred())
+            PyErr_SetString(PyExc_SystemError, "no symtable");
+        goto finally;
+    }
+
+    co = compiler_mod(&c, mod);
+
+ finally:
+    compiler_free(&c);
+    assert(co || PyErr_Occurred());
+    return co;
+}
+```
+
+### __future__标志和编译器标志
+
+在编译器运行之前，有两种类型的标志可以切换编译器内部的功能。这些来自两个地方：
+
+* 解释器状态（可能是命令行选项）在`pyconfig.h`环境变量中或通过环境变量设置
+* 在`__future__`模块实际源代码中使用语句
+为了区分两种类型的标志，请考虑`__future__`由于该特定模块中的语法或功能而需要标志。例如，Python 3.7通过`annotations`标志引入了对类型提示的延迟评估：
+
+```py
+from __future__ import annotations
+```
+
+该语句之后的代码可能使用未解析的类型提示，因此该`__future__`语句是必需的。否则，该模块将不会导入。手动请求导入模块的人启用此特定的编译器标志将是无法维护的。
+
+其他编译器标志是特定于环境的，因此它们可能会更改代码的执行方式或编译器的运行方式，但它们不应以与`__future__`语句相同的方式链接到源。
+
+编译器标志的一个示例是`-O`用于优化assert语句使用的标志。该标志禁用所有assert可能出于调试目的而放置在代码中的语句。也可以通过环境变量`PYTHONOPTIMIZE=1`设置启用它。
+
+### 符号表
+
+在`PyAST_CompileObject()`中有对a的引用`symtable`以及`PySymtable_BuildObject()`对要执行的模块的调用。
+
+符号表的目的是提供一个名称空间，全局变量和局部变量的列表，供编译器用于引用和解析范围。
+
+`Include/symtable.h`中的`symtable`结构有据可查，因此很清楚每个字段的用途。编译器应该有一个对称实例，因此命名空间必不可少。
+
+如果创建resolve_names()在一个模块中调用的函数，并在另一个模块中声明具有相同名称的另一个函数，则需要确定调用了哪个函数。symtable用于此目的，并确保在狭窄范围内声明的变量不会自动成为全局变量（毕竟，这不是JavaScript）：
+
+```cpp
+struct symtable {
+    PyObject *st_filename;          /* name of file being compiled,
+                                       decoded from the filesystem encoding */
+    struct _symtable_entry *st_cur; /* current symbol table entry */
+    struct _symtable_entry *st_top; /* symbol table entry for module */
+    PyObject *st_blocks;            /* dict: map AST node addresses
+                                     *       to symbol table entries */
+    PyObject *st_stack;             /* list: stack of namespace info */
+    PyObject *st_global;            /* borrowed ref to st_top->ste_symbols */
+    int st_nblocks;                 /* number of blocks used. kept for
+                                       consistency with the corresponding
+                                       compiler structure */
+    PyObject *st_private;           /* name of current class or NULL */
+    PyFutureFeatures *st_future;    /* module's future features that affect
+                                       the symbol table */
+    int recursion_depth;            /* current recursion depth */
+    int recursion_limit;            /* recursion limit */
+};
+```
+
+一些符号表API是通过标准库中的symtable模块公开的。可以提供一个表达式或一个模块来接收symtable.SymbolTable实例。
+
+遍历表中的元素，可以看到一些公共字段和私有字段及其类型：
+
+```py
+>>> import symtable
+>>> s = symtable.symtable('b + 1', filename='test.py', compile_type='eval')
+>>> [symbol.__dict__ for symbol in s.get_symbols()]
+[{'_Symbol__name': 'b', '_Symbol__flags': 6160, '_Symbol__scope': 3, '_Symbol__namespaces': ()}]
+```
+
+其背后的C代码都在`Python/symtable.c`中，主要接口是`PySymtable_BuildObject()`功能。
+
+与之前介绍的顶级AST函数类似，`PySymtable_BuildObject()`函数在mod_ty可能的类型（模块，表达式，交互式，套件，函数类型）之间切换，并访问其中的每个语句。
+
+*mod_ty是一个AST实例，因此现在将递归地浏览树的节点和分支并将条目添加到symtable中*
+
+```cpp
+struct symtable *
+PySymtable_BuildObject(mod_ty mod, PyObject *filename, PyFutureFeatures *future)
+{
+    struct symtable *st = symtable_new();
+    asdl_seq *seq;
+    int i;
+    PyThreadState *tstate;
+    int recursion_limit = Py_GetRecursionLimit();
+...
+    st->st_top = st->st_cur;
+    switch (mod->kind) {
+    case Module_kind:
+        seq = mod->v.Module.body;
+        for (i = 0; i < asdl_seq_LEN(seq); i++)
+            if (!symtable_visit_stmt(st,
+                        (stmt_ty)asdl_seq_GET(seq, i)))
+                goto error;
+        break;
+    case Expression_kind:
+        ...
+    case Interactive_kind:
+        ...
+    case Suite_kind:
+        ...
+    case FunctionType_kind:
+        ...
+    }
+    ...
+}
+```
+
+因此，对于一个模块，`PySymtable_BuildObject()`将遍历模块中的每个语句并调用`symtable_visit_stmt()`。`symtable_visit_stmt()`是一个巨大的switch具有用于每个语句类型（在所限定的case语句Parser/Python.asdl）。
+
+对于每种语句类型，该语句类型都有特定的逻辑。例如，函数定义具有以下特定逻辑:
+
+* 如果递归深度超出限制，则引发递归深度错误
+* 要添加为局部变量的函数的名称
+* 要解析的顺序参数的默认值
+* 要解析的关键字参数的默认值
+* 参数或返回类型的所有注释均已解析
+* 任何函数装饰器都可以解析
+* 带有功能内容的代码块在`symtable_enter_block()`位置访问 
+* 参数被访问
+* 访问该函数的主体
+
+*注意：为什么Python的默认参数是可变的，原因在于此函数。可以看到它们是指向符号表中变量的指针。无需执行任何额外的工作即可将任何值复制到不可变类型。*
+
+```cpp
+static int
+symtable_visit_stmt(struct symtable *st, stmt_ty s)
+{
+    if (++st->recursion_depth > st->recursion_limit) {                          // 1.
+        PyErr_SetString(PyExc_RecursionError,
+                        "maximum recursion depth exceeded during compilation");
+        VISIT_QUIT(st, 0);
+    }
+    switch (s->kind) {
+    case FunctionDef_kind:
+        if (!symtable_add_def(st, s->v.FunctionDef.name, DEF_LOCAL))            // 2.
+            VISIT_QUIT(st, 0);
+        if (s->v.FunctionDef.args->defaults)                                    // 3.
+            VISIT_SEQ(st, expr, s->v.FunctionDef.args->defaults);
+        if (s->v.FunctionDef.args->kw_defaults)                                 // 4.
+            VISIT_SEQ_WITH_NULL(st, expr, s->v.FunctionDef.args->kw_defaults);
+        if (!symtable_visit_annotations(st, s, s->v.FunctionDef.args,           // 5.
+                                        s->v.FunctionDef.returns))
+            VISIT_QUIT(st, 0);
+        if (s->v.FunctionDef.decorator_list)                                    // 6.
+            VISIT_SEQ(st, expr, s->v.FunctionDef.decorator_list);
+        if (!symtable_enter_block(st, s->v.FunctionDef.name,                    // 7.
+                                  FunctionBlock, (void *)s, s->lineno,
+                                  s->col_offset))
+            VISIT_QUIT(st, 0);
+        VISIT(st, arguments, s->v.FunctionDef.args);                            // 8.
+        VISIT_SEQ(st, stmt, s->v.FunctionDef.body);                             // 9.
+        if (!symtable_exit_block(st, s))
+            VISIT_QUIT(st, 0);
+        break;
+    case ClassDef_kind: {
+        ...
+    }
+    case Return_kind:
+        ...
+    case Delete_kind:
+        ...
+    case Assign_kind:
+        ...
+    case AnnAssign_kind:
+        ...
+```
+
+创建结果符号表后，将其传递回以供编译器使用。
+
+### 核心编译过程
+
+`PyAST_CompileObject()`具有编译器状态，符号表和AST形式的模块，可以开始实际的编译了。
+
+核心编译器的目的是：
+
+* 将状态，符号表和AST转换为控制流图（CFG）
+* 通过捕获任何逻辑和代码错误并在此处引发它们，保护执行阶段免受运行时异常的影响
+
+可以通过调用内置函数，以Python代码调用CPython编译器`compile()`。它返回一个code object实例：
+
+```py
+>>> compile('b+1', 'test.py', mode='eval')
+<code object <module> at 0x10f222780, file "test.py", line 1>
+```
+
+与`symtable()`函数相同，简单表达式的模式应为`'eval'`而模块，函数或类的模式应为`'exec'`。
+
+可以在代码对象的`co_code`属性中找到已编译的代码：
+
+```py
+>>> co.co_code
+b'e\x00d\x00\x17\x00S\x00'
+```
+
+dis标准库中还有一个模块，它可以分解字节码指令，并可以在屏幕上打印它们或为传递提供Instruction实例列表。
+
+如果导入dis并为dis()函数提供代码对象的co_code属性，它将对其进行反汇编并在REPL上打印指令：
+
+```py
+>>> import dis
+>>> dis.dis(co.co_code)
+          0 LOAD_NAME                0 (0)
+          2 LOAD_CONST               0 (0)
+          4 BINARY_ADD
+          6 RETURN_VALUE
+```
+
+`LOAD_NAME`，`LOAD_CONST`，`BINARY_ADD`，和`RETURN_VALUE`都是字节码指令。之所以称为字节码，是因为它们以二进制形式存在一个字节长。但是，由于Python 3.6的存储格式已更改为word，因此从技术上讲，它们现在是字码，而不是字节码。
+
+字节码指令的完整列表可用于每个Python版本，并且确实在版本之间有所不同。例如，在Python 3.7中，引入了一些新的字节码指令以加快特定方法调用的执行速度。
+
+在前面的部分中，探讨了`instaviz`程序包。这包括通过运行编译器来可视化代码对象类型。它还在代码对象内部显示Bytecode操作。
+
+再次执行instaviz以查看REPL上定义的函数的代码对象和字节码：
+
+```py
+>>> import instaviz
+>>> def example():
+       a = 1
+       b = a + 1
+       return b
+>>> instaviz.show(example)
+```
+
+如果现在进入`compiler_mod()`，则该函数用于根据模块类型切换到不同的编译器函数。假设`mod`是个`Module`。该模块被编译为编译器状态，然后运行`assemble()`以创建`PyCodeObject`。
+
+新的代码对象将返回`PyAST_CompileObject()`并继续执行：
+
+```cpp
+static PyCodeObject *
+compiler_mod(struct compiler *c, mod_ty mod)
+{
+    PyCodeObject *co;
+    int addNone = 1;
+    static PyObject *module;
+    ...
+    switch (mod->kind) {
+    case Module_kind:
+        if (!compiler_body(c, mod->v.Module.body)) {
+            compiler_exit_scope(c);
+            return 0;
+        }
+        break;
+    case Interactive_kind:
+        ...
+    case Expression_kind:
+        ...
+    case Suite_kind:
+        ...
+    ...
+    co = assemble(c, addNone);
+    compiler_exit_scope(c);
+    return co;
+}
+```
+
+`compiler_body()`函数具有一些优化标志，然后循环访问模块中的每个语句并对其进行访问，类似于这些`symtable`函数的工作方式：
+
+```cpp
+static int
+compiler_body(struct compiler *c, asdl_seq *stmts)
+{
+    int i = 0;
+    stmt_ty st;
+    PyObject *docstring;
+    ...
+    for (; i < asdl_seq_LEN(stmts); i++)
+        VISIT(c, stmt, (stmt_ty)asdl_seq_GET(stmts, i));
+    return 1;
+}
+```
+
+语句类型是通过调用`asdl_seq_GET()`函数确定的，该函数查看AST节点的类型。
+
+通过一些智能宏，为每种语句类型`VISIT`调用一个函数`Python/compile.c`
+
+```cpp
+#define VISIT(C, TYPE, V) {\
+    if (!compiler_visit_ ## TYPE((C), (V))) \
+        return 0; \
+}
+```
+
+对于`stmt`（语句的类型），编译器将进入`compiler_visit_stmt()`并切换在`Parser/Python.asdl`以下位置找到的所有可能的语句类型：
+
+```cpp
+static int
+compiler_visit_stmt(struct compiler *c, stmt_ty s)
+{
+    Py_ssize_t i, n;
+
+    /* Always assign a lineno to the next instruction for a stmt. */
+    c->u->u_lineno = s->lineno;
+    c->u->u_col_offset = s->col_offset;
+    c->u->u_lineno_set = 0;
+
+    switch (s->kind) {
+    case FunctionDef_kind:
+        return compiler_function(c, s, 0);
+    case ClassDef_kind:
+        return compiler_class(c, s);
+    ...
+    case For_kind:
+        return compiler_for(c, s);
+    ...
+    }
+
+    return 1;
+}
+```
+
+例如，集中讨论`For`语句，在Python中是：
+
+```py
+for i in iterable:
+    # block
+else:  # optional if iterable is False
+    # block
+```
+
+如果该语句是`For`类型，则调用`compiler_for()`。`compiler_*()`所有语句和表达式类型都有一个等效函数。更直接的类型可以内联创建字节码指令，某些更复杂的语句类型可以调用其他函数。
+
+许多语句可以具有子语句。一个`for`循环有一个域，但也可以在分配和迭代复杂的表达式。
+
+编译器的`compiler_`语句将块传递到编译器状态。这些块包含指令，其中的指令数据结构`Python/compile.c`具有操作码，任何自变量和目标块（如果这是跳转指令），还包含行号。
+
+对于跳转语句，它们可以是绝对跳转语句，也可以是相对跳转语句。跳转语句用于将一个操作“跳转”到另一个操作。绝对跳转语句在编译后的代码对象中指定确切的操作号，而相对跳转语句指定相对于另一个操作的跳转目标：
+
+```cpp
+struct instr {
+    unsigned i_jabs : 1;
+    unsigned i_jrel : 1;
+    unsigned char i_opcode;
+    int i_oparg;
+    struct basicblock_ *i_target; /* target block (if jump instruction) */
+    int i_lineno;
+};
+```
+
+因此，（类型为basicblock）的框架块包含以下字段：
+
+* 一个b_list指针，链接块列表编译器状态
+* 指令列表b_instr，包括分配的列表大小b_ialloc和使用的数量b_iused
+* 此块之后的下一个块 b_next
+* 深度优先遍历时，汇编器是否已“看到”块
+* 如果此块具有RETURN_VALUE操作码（b_return）
+* 输入此块时的堆栈深度（b_startdepth）
+* 汇编程序的指令偏移量
+
+```cpp
+typedef struct basicblock_ {
+    /* Each basicblock in a compilation unit is linked via b_list in the
+       reverse order that the block are allocated.  b_list points to the next
+       block, not to be confused with b_next, which is next by control flow. */
+    struct basicblock_ *b_list;
+    /* number of instructions used */
+    int b_iused;
+    /* length of instruction array (b_instr) */
+    int b_ialloc;
+    /* pointer to an array of instructions, initially NULL */
+    struct instr *b_instr;
+    /* If b_next is non-NULL, it is a pointer to the next
+       block reached by normal control flow. */
+    struct basicblock_ *b_next;
+    /* b_seen is used to perform a DFS of basicblocks. */
+    unsigned b_seen : 1;
+    /* b_return is true if a RETURN_VALUE opcode is inserted. */
+    unsigned b_return : 1;
+    /* depth of stack upon entry of block, computed by stackdepth() */
+    int b_startdepth;
+    /* instruction offset for block, computed by assemble_jump_offsets() */
+    int b_offset;
+} basicblock;
+```
+
+`For`语句在复杂性方面处于中等水平。`For`使用`for <target> in <iterator>:`语法编译语句需要15个步骤：
+
+1. 创建一个名为的新代码块start，这将分配内存并创建一个basicblock指针
+2. 创建一个名为的新代码块 cleanup
+3. 创建一个名为的新代码块 end
+4. 将类型的框架块作为入口块和出口块推FOR_LOOP入堆栈startend
+5. 访问迭代器表达式，该表达式为迭代器添加任何操作
+6. 将GET_ITER操作添加到编译器状态
+7. 切换到start方块
+8. 调用ADDOP_JREL哪个调用compiler_addop_j()以添加FOR_ITER带有cleanup块参数的操作
+9. 前往target并在start区块中加入任何特殊的代码，例如元组解包
+10. 访问for循环主体中的每个语句
+11. 调用ADDOP_JABS，该调用compiler_addop_j()将添加JUMP_ABSOLUTE指示在执行主体之后执行的操作，并跳回到循环的开始
+12. 移至cleanup街区
+13. 将FOR_LOOP框架块弹出堆栈
+14. 访问elsefor循环部分中的语句
+15. 使用end块
+
+回到basicblock结构。可以看到在for语句的编译中如何创建各种块并将其压入编译器的框架块和堆栈中：
+
+```cpp
+static int
+compiler_for(struct compiler *c, stmt_ty s)
+{
+    basicblock *start, *cleanup, *end;
+
+    start = compiler_new_block(c);                       // 1.
+    cleanup = compiler_new_block(c);                     // 2.
+    end = compiler_new_block(c);                         // 3.
+    if (start == NULL || end == NULL || cleanup == NULL)
+        return 0;
+
+    if (!compiler_push_fblock(c, FOR_LOOP, start, end))  // 4.
+        return 0;
+
+    VISIT(c, expr, s->v.For.iter);                       // 5.
+    ADDOP(c, GET_ITER);                                  // 6.
+    compiler_use_next_block(c, start);                   // 7.
+    ADDOP_JREL(c, FOR_ITER, cleanup);                    // 8.
+    VISIT(c, expr, s->v.For.target);                     // 9.
+    VISIT_SEQ(c, stmt, s->v.For.body);                   // 10.
+    ADDOP_JABS(c, JUMP_ABSOLUTE, start);                 // 11.
+    compiler_use_next_block(c, cleanup);                 // 12.
+
+    compiler_pop_fblock(c, FOR_LOOP, start);             // 13.
+
+    VISIT_SEQ(c, stmt, s->v.For.orelse);                 // 14.
+    compiler_use_next_block(c, end);                     // 15.
+    return 1;
+}
+```
+
+`APPOP_JREL`和`ADDOP_JABS`宏，它们分别调用`compiler_addop_j(struct compiler *c, int opcode, basicblock *b, int absolute)`并将`absolute`参数设置为0和1。
+
+还有其他一些宏，例如`ADDOP_I`调用`compiler_addop_i()`添加带有整数参数的操作，或`ADDOP_O`调用`compiler_addop_o()`添加带有`PyObject`参数的操作。完成这些阶段后，编译器将获得一个框架块列表，每个框架块均包含指令列表和指向下一个块的指针。
+
+在**编译器**状态下，**汇编器**对块执行**深度优先搜索DFS**，并将指令合并为单个字节码序列。汇编器状态在`Python/compile.c`以下位置声明：
+
+```cpp
+struct assembler {
+    PyObject *a_bytecode;  /* string containing bytecode */
+    int a_offset;              /* offset into bytecode */
+    int a_nblocks;             /* number of reachable blocks */
+    basicblock **a_postorder; /* list of blocks in dfs postorder */
+    PyObject *a_lnotab;    /* string containing lnotab */
+    int a_lnotab_off;      /* offset into lnotab */
+    int a_lineno;              /* last lineno of emitted instruction */
+    int a_lineno_off;      /* bytecode offset of last lineno */
+};
+```
+
+`assemble()`函数有一些任务：
+
+* 计算内存分配的块数
+* 确保每个结束的块都返回`None`，这就是每个函数都返回`None`的原因，无论是否存在语句`return`
+* 解决所有标记为相对的跳转语句偏移量
+* 调用`dfs()`以对块执行深度优先搜索
+* 将所有指令传递给编译器
+* `makecode()`以编译器状态调用以生成`PyCodeObject`
+
+```cpp
+static PyCodeObject *
+assemble(struct compiler *c, int addNone)
+{
+    basicblock *b, *entryblock;
+    struct assembler a;
+    int i, j, nblocks;
+    PyCodeObject *co = NULL;
+
+    /* Make sure every block that falls off the end returns None.
+       XXX NEXT_BLOCK() isn't quite right, because if the last
+       block ends with a jump or return b_next shouldn't set.
+     */
+    if (!c->u->u_curblock->b_return) {
+        NEXT_BLOCK(c);
+        if (addNone)
+            ADDOP_LOAD_CONST(c, Py_None);
+        ADDOP(c, RETURN_VALUE);
+    }
+    ...
+    dfs(c, entryblock, &a, nblocks);
+
+    /* Can't modify the bytecode after computing jump offsets. */
+    assemble_jump_offsets(&a, c);
+
+    /* Emit code in reverse postorder from dfs. */
+    for (i = a.a_nblocks - 1; i >= 0; i--) {
+        b = a.a_postorder[i];
+        for (j = 0; j < b->b_iused; j++)
+            if (!assemble_emit(&a, &b->b_instr[j]))
+                goto error;
+    }
+    ...
+
+    co = makecode(c, &a);
+ error:
+    assemble_free(&a);
+    return co;
+}
+```
+
+深度优先搜索由中的dfs()函数执行，该函数`Python/compile.c`跟随`b_next`每个块中的指针，将其标记为通过切换可见`b_seen`，然后`**a_postorder`以相反的顺序将其添加到汇编器列表中。
+
+该函数循环返回汇编器的后置列表，对于每个块，如果它具有跳转操作，则递归调用`dfs()`跳转：
+
+```cpp
+static void
+dfs(struct compiler *c, basicblock *b, struct assembler *a, int end)
+{
+    int i, j;
+
+    /* Get rid of recursion for normal control flow.
+       Since the number of blocks is limited, unused space in a_postorder
+       (from a_nblocks to end) can be used as a stack for still not ordered
+       blocks. */
+    for (j = end; b && !b->b_seen; b = b->b_next) {
+        b->b_seen = 1;
+        assert(a->a_nblocks < j);
+        a->a_postorder[--j] = b;
+    }
+    while (j < end) {
+        b = a->a_postorder[j++];
+        for (i = 0; i < b->b_iused; i++) {
+            struct instr *instr = &b->b_instr[i];
+            if (instr->i_jrel || instr->i_jabs)
+                dfs(c, instr->i_target, a, j);
+        }
+        assert(a->a_nblocks < j);
+        a->a_postorder[a->a_nblocks++] = b;
+    }
+}
+```
+
+### 创建代码对象
+
+`makecode()`的任务是遍历编译器状态，一些汇编程序的属性，并通过调用`PyCode_New()`将这些属性放入a中`PyCodeObject`：
+
+```cpp
+static PyCodeObject *
+makecode(struct compiler *c, struct assembler *a)
+{
+...
+
+    consts = consts_dict_keys_inorder(c->u->u_consts);
+    names = dict_keys_inorder(c->u->u_names, 0);
+    varnames = dict_keys_inorder(c->u->u_varnames, 0);
+...
+    cellvars = dict_keys_inorder(c->u->u_cellvars, 0);
+...
+    freevars = dict_keys_inorder(c->u->u_freevars, PyTuple_GET_SIZE(cellvars));
+...
+    flags = compute_code_flags(c);
+    if (flags < 0)
+        goto error;
+
+    bytecode = PyCode_Optimize(a->a_bytecode, consts, names, a->a_lnotab);
+...
+    co = PyCode_NewWithPosOnlyArgs(posonlyargcount+posorkeywordargcount,
+                                   posonlyargcount, kwonlyargcount, nlocals_int, 
+                                   maxdepth, flags, bytecode, consts, names,
+                                   varnames, freevars, cellvars, c->c_filename,
+                                   c->u->u_name, c->u->u_firstlineno, a->a_lnotab);
+...
+    return co;
+}
+```
+
+字节码在传递到`PyCode_Optimize()`之前先传递到`PyCode_NewWithPosOnlyArgs()`。此功能是`Python/peephole.c`中的字节码优化过程的一部分:
+
+窥孔优化器会仔细检查字节码指令，并在某些情况下将其替换为其他指令。例如，有一个名为“常量展开”的优化程序，因此，如果在脚本中输入以下语句：
+
+```py
+a = 1 + 5
+```
+
+被优化为:
+
+```py
+a = 6
+```
+
+### 执行代码
+
+在`Python/pythonrun.c`调用之前先了解`run_eval_code_obj()`。此调用采用从封送处理的`.pyc`文件中获取或通过AST和编译器阶段进行编译的代码对象。`run_eval_code_obj()`将传递全局变量，本地变量，`PyArena`并为`Python/ceval.c`中的`PyEval_EvalCode()`编译`PyCodeObject`。
+
+此阶段构成`CPython`的执行组件。每个字节码操作都是使用基于“堆栈帧”的系统执行的。**堆栈框架**是许多运行时使用的数据类型，而不仅仅是Python，它允许调用函数并在函数之间返回变量。堆栈框架还包含参数，局部变量和其他状态信息。通常，每个函数调用都存在一个堆栈框架，并且它们按顺序堆叠。只要未处理异常，并且堆栈显示在屏幕上，传递就可以看到CPython的框架堆栈。
+
+`PyEval_EvalCode()`是用于评估代码对象的公共API。评估逻辑`在_PyEval_EvalCodeWithName()`和`_PyEval_EvalFrameDefault()`之间分割，两者均在`ceval.c`中。
+
+公共API `PyEval_EvalCode()`将通过调用从堆栈的顶部构造一个执行框架`_PyEval_EvalCodeWithName()`。
+
+第一个执行框架的构建包含许多步骤：
+
+1. 关键字和位置参数已解决。
+2. 函数定义中`*args`和`**kwargs`的使用均已解决。
+3. 参数作为局部变量添加到范围。
+4. 将创建协例程和生成器，包括异步生成器。
+
+#### 1.构造线程状态
+
+在执行框架之前，需要从线程中引用它。CPython可以在一个解释器中随时运行多个线程。解释器状态包括这些线程的列表作为链接列表。线程结构被称为`PyThreadState`，并且整个过程中都有许多引用`ceval.c`。
+
+#### 2.构建框架
+
+作为输入`PyEval_EvalCode()`，因此`_PyEval_EvalCodeWithName()`具有以下参数：
+
+* **_co**：一个PyCodeObject
+* **globals**：一个PyDict变量名作为键和值
+* **locals**：一个PyDict变量名作为键和值
+
+其他参数是可选的，不用于基本API：
+
+* **args**：一个PyTuple具有位置参数值顺序和argcount数量值的参数
+* **kwnames**：关键字参数名称的列表
+* **kwargs**：关键字参数值的列表，并kwcount包含数量
+* **defs**：位置参数和defcount长度的默认值列表
+* **kwdefs**：具有关键字参数默认值的字典
+* **closure**：包含字符串的元组以合并到代码对象co_freevars字段中
+* **name**：此评估声明的名称为字符串
+* **qualname**：此评估声明的限定名称（字符串）
+
+```cpp
+PyObject *
+_PyEval_EvalCodeWithName(PyObject *_co, PyObject *globals, PyObject *locals,
+           PyObject *const *args, Py_ssize_t argcount,
+           PyObject *const *kwnames, PyObject *const *kwargs,
+           Py_ssize_t kwcount, int kwstep,
+           PyObject *const *defs, Py_ssize_t defcount,
+           PyObject *kwdefs, PyObject *closure,
+           PyObject *name, PyObject *qualname)
+{
+    ...
+
+    PyThreadState *tstate = _PyThreadState_GET();
+    assert(tstate != NULL);
+
+    if (globals == NULL) {
+        _PyErr_SetString(tstate, PyExc_SystemError,
+                         "PyEval_EvalCodeEx: NULL globals");
+        return NULL;
+    }
+
+    /* Create the frame */
+    f = _PyFrame_New_NoTrack(tstate, co, globals, locals);
+    if (f == NULL) {
+        return NULL;
+    }
+    fastlocals = f->f_localsplus;
+    freevars = f->f_localsplus + co->co_nlocals;
+```
+
+#### 3.将关键字参数转换为字典
+
+如果函数定义包含`**kwargs`关键字参数的样式，则将创建一个新的字典，并在其中复制值。`kwargs`然后将名称设置为变量，如以下示例所示：
+
+```py
+def example(arg, arg2=None, **kwargs):
+    print(kwargs['extra'])  # this would resolve to a dictionary key
+```
+
+创建关键字参数字典的逻辑在`_PyEval_EvalCodeWithName()`的下一部分中：
+
+```cpp
+    /* Create a dictionary for keyword parameters (**kwargs) */
+    if (co->co_flags & CO_VARKEYWORDS) {
+        kwdict = PyDict_New();
+        if (kwdict == NULL)
+            goto fail;
+        i = total_args;
+        if (co->co_flags & CO_VARARGS) {
+            i++;
+        }
+        SETLOCAL(i, kwdict);
+    }
+    else {
+        kwdict = NULL;
+    }
+```
+
+如果找到任何关键字参数，该kwdict变量将引用一个`PyDictObject`
+
+#### 4.将位置参数转换为变量
+
+接下来，将每个位置参数（如果提供）设置为局部变量：
+
+```cpp
+    /* Copy all positional arguments into local variables */
+    if (argcount > co->co_argcount) {
+        n = co->co_argcount;
+    }
+    else {
+        n = argcount;
+    }
+    for (j = 0; j < n; j++) {
+        x = args[j];
+        Py_INCREF(x);
+        SETLOCAL(j, x);
+    }
+```
+
+在循环的最后，将看到`SETLOCAL()`使用值调用，因此，如果使用值定义了位置参数，则此范围内可用：
+
+```py
+def example(arg1, arg2):
+    print(arg1, arg2)  # both args are already local variables.
+```
+
+同样，这些变量的引用计数器也会增加，因此垃圾收集器将不会删除它们，直到框架评估完毕。
+
+#### 5.将位置参数打包 *args
+
+与`**kwargs`相似，`*`可以将以a开头的函数参数设置为捕获所有剩余的位置参数。此参数是一个元组，`*args`名称设置为局部变量：
+
+```cpp
+    /* Pack other positional arguments into the *args argument */
+    if (co->co_flags & CO_VARARGS) {
+        u = _PyTuple_FromArray(args + n, argcount - n);
+        if (u == NULL) {
+            goto fail;
+        }
+        SETLOCAL(total_args, u);
+    }
+```
+
+#### 6.加载关键字参数
+
+如果使用关键字参数和值调用了该函数，则kwdict在第4步中创建的词典现在将由调用者传递的所有其余关键字参数填充，这些关键字参数无法解析为命名参数或位置参数。
+
+例如，e参数既不是位置参数也不是命名参数，因此将其添加到**remaining：
+
+```py
+>>> def my_function(a, b, c=None, d=None, **remaining):
+       print(a, b, c, d, remaining)
+
+>>> my_function(a=1, b=2, c=3, d=4, e=5)
+(1, 2, 3, 4, {'e': 5})
+```
+
+仅位置参数是Python 3.8的新功能。在PEP570中引入的仅位置参数是一种阻止API用户使用带有关键字语法的位置参数的方法。
+
+例如，此简单函数将Farenheit转换为Celcius。注意，将/用作特殊参数会将仅位置参数与其他参数分开。
+
+```py
+def to_celcius(farenheit, /, options=None):
+    return (farenheit-31)*5/9
+```
+
+左边的所有参数都`/`只能称为位置参数，右边的参数可以称为位置参数或关键字参数：
+
+```py
+>>> to_celcius(110)
+```
+
+使用关键字参数到仅位置参数的函数调用该函数将引发TypeError：
+
+```py
+>>> to_celcius(farenheit=110)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+TypeError: to_celcius() got some positional-only arguments passed as keyword arguments: 'farenheit'
+```
+
+关键字参数字典值的解析是在解压缩所有其他参数之后得出的。通过在处启动keyword-argument循环来显示PEP570仅位置参数co_posonlyargcount。如果`/`符号是在第三个参数使用的值co_posonlyargcount会2。 `PyDict_SetItem()`会为每个剩余的参数调用，以将其添加到locals字典中，因此在执行时，每个关键字参数都是作用域局部变量：
+
+```cpp
+  for (i = 0; i < kwcount; i += kwstep) {
+        PyObject **co_varnames;
+        PyObject *keyword = kwnames[i];
+        PyObject *value = kwargs[i];
+        ...
+
+        /* Speed hack: do raw pointer compares. As names are
+           normally interned this should almost always hit. */
+        co_varnames = ((PyTupleObject *)(co->co_varnames))->ob_item;
+        for (j = co->co_posonlyargcount; j < total_args; j++) {
+            PyObject *name = co_varnames[j];
+            if (name == keyword) {
+                goto kw_found;
+            }
+        }
+
+        if (kwdict == NULL) {
+
+            if (co->co_posonlyargcount
+                && positional_only_passed_as_keyword(tstate, co,
+                                                     kwcount, kwnames))
+            {
+                goto fail;
+            }
+
+            _PyErr_Format(tstate, PyExc_TypeError,
+                          "%U() got an unexpected keyword argument '%S'",
+                          co->co_name, keyword);
+            goto fail;
+        }
+
+        if (PyDict_SetItem(kwdict, keyword, value) == -1) {
+            goto fail;
+        }
+        continue;
+
+      kw_found:
+        ...
+        Py_INCREF(value);
+        SETLOCAL(j, value);
+    }
+    ...
+```
+
+在循环的最后，会看到一个调用`SETLOCAL()`的值。如果使用值定义了关键字参数，则在此范围内可用：
+
+```py
+def example(arg1, arg2, example_kwarg=None):
+    print(example_kwarg)  # example_kwarg is already a local variable.
+```
+
+#### 7.添加缺少的位置参数
+
+如果该元组`*args`不存在，则提供给函数调用的所有不在位置参数列表中的位置参数都将添加到该元组中，从而导致失败：
+
+```cpp
+  /* Add missing positional arguments (copy default values from defs) */
+    if (argcount < co->co_argcount) {
+        Py_ssize_t m = co->co_argcount - defcount;
+        Py_ssize_t missing = 0;
+        for (i = argcount; i < m; i++) {
+            if (GETLOCAL(i) == NULL) {
+                missing++;
+            }
+        }
+        if (missing) {
+            missing_arguments(co, missing, defcount, fastlocals);
+            goto fail;
+        }
+        if (n > m)
+            i = n - m;
+        else
+            i = 0;
+        for (; i < defcount; i++) {
+            if (GETLOCAL(m+i) == NULL) {
+                PyObject *def = defs[i];
+                Py_INCREF(def);
+                SETLOCAL(m+i, def);
+            }
+        }
+    }
+```
+
+#### 8.添加缺少的关键字参数
+
+如果此字典`**kwargs`不存在，则提供给函数调用的，不在命名的关键字参数列表中的所有关键字参数都将添加到字典中，从而导致失败：
+
+```cpp
+    /* Add missing keyword arguments (copy default values from kwdefs) */
+    if (co->co_kwonlyargcount > 0) {
+        Py_ssize_t missing = 0;
+        for (i = co->co_argcount; i < total_args; i++) {
+            PyObject *name;
+            if (GETLOCAL(i) != NULL)
+                continue;
+            name = PyTuple_GET_ITEM(co->co_varnames, i);
+            if (kwdefs != NULL) {
+                PyObject *def = PyDict_GetItemWithError(kwdefs, name);
+                ...
+            }
+            missing++;
+        }
+        ...
+    }
+```
+
+#### 9.倒闭的瓶盖
+
+任何闭包名称都会添加到代码对象的可用变量名称列表中：
+
+```cpp
+    /* Copy closure variables to free variables */
+    for (i = 0; i < PyTuple_GET_SIZE(co->co_freevars); ++i) {
+        PyObject *o = PyTuple_GET_ITEM(closure, i);
+        Py_INCREF(o);
+        freevars[PyTuple_GET_SIZE(co->co_cellvars) + i] = o;
+    }
+```
+
+#### 10.创建生成器，协程和异步生成器
+
+如果所评估的代码对象具有标志，表明它是生成器，协程或异步生成器，则使用生成器，协程或异步库中的唯一方法之一创建新帧，并将当前帧作为属性添加。
+
+然后返回新框架，并且不评估原始框架。仅当调用生成器/协程/异步方法执行其目标时，才评估框架：
+
+```cpp
+/* Handle generator/coroutine/asynchronous generator */
+    if (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR)) {
+        ...
+
+        /* Create a new generator that owns the ready to run frame
+         * and return that as the value. */
+        if (is_coro) {
+            gen = PyCoro_New(f, name, qualname);
+        } else if (co->co_flags & CO_ASYNC_GENERATOR) {
+            gen = PyAsyncGen_New(f, name, qualname);
+        } else {
+            gen = PyGen_NewWithQualName(f, name, qualname);
+        }
+        ...
+
+        return gen;
+    }
+```
+
+最后，用新框架调用`PyEval_EvalFrameEx()`：
+
+```cpp
+    retval = PyEval_EvalFrameEx(f,0);
+    ...
+}
+```
+
+### 框架执行
+
+如编译器和AST章节前面所述，代码对象包含要执行的字节码的二进制编码。它还包含变量列表和符号表。
+
+局部和全局变量是在运行时根据函数，模块或块的调用方式确定的。该信息通过`_PyEval_EvalCodeWithName()`函数添加到框架。框架还有其他用法，例如协程装饰器，可以动态地将目标作为变量生成框架。
+
+公共API `PyEval_EvalFrameEx()`在`eval_frame`属性中调用解释程序的已配置框架评估函数。框架评估已通过PEP 523在Python 3.7中加入。
+
+`_PyEval_EvalFrameDefault()` 是默认函数，除此以外不使用任何其他函数。
+
+框架在内部的主执行循环中执行`_PyEval_EvalFrameDefault()`。此函数是核心函数，可将所有内容组合在一起并使代码栩栩如生。它包含数十年的优化，因为即使是**一行代码也可能对整个CPython的性能产生重大影响**。
+
+在CPython中执行的所有事情都通过此函数进行。
+
+通过在当前线程上启用跟踪属性，可以逐步在Python 3.7及更高版本中执行帧执行。
+
+此代码示例将全局跟踪函数设置为一个称为的函数，该函数`trace()`从当前帧获取堆栈，将反汇编的操作码打印到屏幕上，并提供一些其他调试信息：
+
+```py
+import sys
+import dis
+import traceback
+import io
+
+def trace(frame, event, args):
+   frame.f_trace_opcodes = True
+   stack = traceback.extract_stack(frame)
+   pad = "   "*len(stack) + "|"
+   if event == 'opcode':
+      with io.StringIO() as out:
+         dis.disco(frame.f_code, frame.f_lasti, file=out)
+         lines = out.getvalue().split('\n')
+         [print(f"{pad}{l}") for l in lines]
+   elif event == 'call':
+      print(f"{pad}Calling {frame.f_code}")
+   elif event == 'return':
+      print(f"{pad}Returning {args}")
+   elif event == 'line':
+      print(f"{pad}Changing line to {frame.f_lineno}")
+   else:
+      print(f"{pad}{frame} ({event} - {args})")
+   print(f"{pad}----------------------------------")
+   return trace
+sys.settrace(trace)
+
+# Run some code for a demo
+eval('"-".join([letter for letter in "hello"])')
+```
+
+### 值栈
+
+在核心评估循环中，将创建一个值堆栈。该堆栈是指向顺序PyObject实例的指针的列表。
+
+想到值堆栈的一种方式就像是一个木制的钉子，可以在上面堆放油缸。一次只能添加或删除一项。这是使用`PUSH(a)`宏完成的，其中a是指向的指针PyObject。
+
+例如，如果您创建了一个PyLong值为10的a 并将其推入值堆栈：
+
+```cpp
+PyObject *a = PyLong_FromLong(10);
+PUSH(a);
+```
+
+在下一个操作中，要获取该值，可以使用POP()宏从堆栈中获取最高值：
+
+```cpp
+PyObject *a = POP();  // a is PyLongObject with a value of 10
+```
+
+此操作将返回最高值并最终得到一个空值堆栈：
+
+如果要向堆栈中添加2个值：
+
+```cpp
+PyObject *a = PyLong_FromLong(10);
+PyObject *b = PyLong_FromLong(20);
+PUSH(a);
+PUSH(b);
+```
+
+如果需要在不弹出的情况下获取指向栈顶值的指针，则可以使用以下`PEEK(v)`操作v(0代表堆栈的顶部，1代表第二个位置：)：
+
+```cpp
+PyObject *first = PEEK(0);
+```
+
+要克隆堆栈顶部的值，可以使用宏`DUP_TWO()`，或通过使用`DUP_TWO`操作码：
+
+```cpp
+DUP_TOP();
+```
+
+有一个旋转宏`ROT_TWO`可以交换第一个和第二个值：
+
+每个操作码都有一个预定义的“堆栈效果”，该堆栈效果由`Python/compile.c`内部的`stack_effect()`函数计算得出。此函数为每个操作码返回堆栈内部值数量的增量。
+
+#### 示例：将项目添加到列表
+
+在Python中，当创建列表时，该.append()方法在列表对象上可用：
+
+```py
+my_list = []
+my_list.append(obj)
+```
+
+此操作涉及2个操作。`LOAD_FAST`，将对象obj从locals框架中的列表加载到值堆栈的顶部，并使用`LIST_APPEND`添加对象。
+
+`LOAD_FAST`共有5个步骤：
+
+1. `obj`的指针是从`GETLOCAL()`加载的，其中要加载的变量是操作参数。变量指针列表存储在中`fastlocals`，它是`PyFrame`属性的副本`f_localsplus`。`operation`参数是一个数字，指向`fastlocals`数组指针中的索引。这意味着本地加载只是指针的副本，而不必查找变量名。
+
+2. 如果变量不再存在，则会引发未绑定的局部变量错误。
+
+3. `value`（在示例中，obj）的引用计数器增加了1。
+
+4. 指向`obj`的指针被推到值堆栈的顶部。
+
+5. 调用`FAST_DISPATCH`宏，如果启用了跟踪，则循环再次遍历（包含所有跟踪），如果未启用跟踪，goto则调用a到`fast_next_opcode`，它跳回到循环顶部以执行下一条指令。
+
+```cpp
+ ... 
+    case TARGET(LOAD_FAST): {
+        PyObject *value = GETLOCAL(oparg);                 // 1.
+        if (value == NULL) {
+            format_exc_check_arg(
+                PyExc_UnboundLocalError,
+                UNBOUNDLOCAL_ERROR_MSG,
+                PyTuple_GetItem(co->co_varnames, oparg));
+            goto error;                                    // 2.
+        }
+        Py_INCREF(value);                                  // 3.
+        PUSH(value);                                       // 4.
+        FAST_DISPATCH();                                   // 5.
+    }
+ ...
+```
+
+现在，指向`obj`的指针位于值堆栈的顶部。下一条指令`LIST_APPEND`运行。
+
+许多字节码操作都引用基本类型，例如`PyUnicode`，`PyNumber`。例如，`LIST_APPEND`将一个对象附加到列表的末尾。为此，它将指针从值堆栈中弹出，并将指针返回到堆栈中的最后一个对象。该宏是以下操作的快捷方式：
+
+```cpp
+PyObject *v = (*--stack_pointer);
+```
+
+现在，指向`obj`的指针存储为v。列表指针从加载`PEEK(oparg)`。
+
+然后，用于Python列表的C API被称为list和v。用于此的代码在`Objects/listobject.c`内部。
+
+调用`PREDICT`，它猜测下一个操作将是`JUMP_ABSOLUTE`。该`PREDICT`宏具有goto针对每个潜在操作的case语句的编译器生成的语句。这意味着CPU可以跳转到该指令，而不必再次经历循环：
+
+```cpp
+ ...
+        case TARGET(LIST_APPEND): {
+            PyObject *v = POP();
+            PyObject *list = PEEK(oparg);
+            int err;
+            err = PyList_Append(list, v);
+            Py_DECREF(v);
+            if (err != 0)
+                goto error;
+            PREDICT(JUMP_ABSOLUTE);
+            DISPATCH();
+        }
+ ...
+```
+
+某些操作（例如`CALL_FUNCTION`，`CALL_METHOD`）具有引用另一个已编译函数的操作参数。在这些情况下，将另一个框架推入线程中的框架堆栈，并对该函数运行评估循环，直到该函数完成。每次创建新框架并将其推入堆栈时，在f_back创建新框架之前，将框架的值设置为当前框架。
+
+当看到堆栈跟踪时，这种框架嵌套很明显，请使用以下示例脚本：
+
+```py
+def function2():
+  raise RuntimeError
+
+def function1():
+  function2()
+
+if __name__ == '__main__':
+  function1()
+```
+
+在命令行上调用它将会得到如下信息：
+
+```sh
+$ ./python.exe example_stack.py
+
+Traceback (most recent call last):
+  File "example_stack.py", line 8, in <module>
+    function1()
+  File "example_stack.py", line 5, in function1
+    function2()
+  File "example_stack.py", line 2, in function2
+    raise RuntimeError
+RuntimeError
+```
 
