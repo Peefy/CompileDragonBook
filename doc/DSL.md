@@ -56,9 +56,185 @@ DSL可以简化复杂的代码，促进与客户沟通的效率，提高工作�
 
 ### 1.2 状态机模型
 
-对于指定控制器如何运作而言，状态机是一个恰当的抽象，下一步就是确保这个抽象能够运用到软件自身。
+对于指定控制器如何运作而言，状态机是一个恰当的抽象，下一步就是确保这个抽象能够运用到软件自身。如果人们在考虑控制器行为时，也要考虑事件，状态和转换，那么，希望这些词汇也可以出现在软件代码里。从本质上说，这就是**领域驱动设计(Domain-Driven Design)**中的**DDD原则**。也就是说在领域人员和程序员之间构建的一种共享语言。
 
-<!-- DSL看到了第30页-->
+对于Java程序来说，自然的方式就是以状态机为Domain Model。通过接收事件消息和发送命令消息，控制器得以同设备通信。这些消息都是四字母编码，可以通过通信通道进行发送。在控制器代码里面，想用**符号名(symbolic name)**引用这些消息。创建了事件类和命令类，它们都有代码(code)和名字(name)。把它们放到单独的类里面(有一个超类)，因为在控制器的代码里，它们扮演者不同的角色。
+
+```java
+class AbstractEvent {
+    private String name, code;
+    public AbstractEvent(String name, String code) {
+        this.name = name;
+        this.code = code;
+    } 
+    public String getCode() {
+        return code;
+    }
+
+    public String getName() {
+        return name;
+    }
+}
+public class Command extends AbstractEvent {}
+public class Event extends AbstractEvent {}
+```
+
+状态类记录了它会发送的命令及其相应的转换
+
+```java
+class State {
+    private String name;
+    private List<Command> actions = new ArrayList<Command>();
+    private Map<String, Transition> transitions = new HashMap<String, Transtion>();
+}
+
+class State {
+    public void addTranstion(Event event, State targetState) {
+        assert null != targetState;
+        transtitions.put(event.getCode(), new Transition(this, event, targetState));
+    }
+}
+
+class Transition {
+    private final State source, target;
+    private final Event trigger;
+
+    public Transtion(State source, Event trigger, State target){
+        this.source = source;
+        this.target = target;
+        this.trigger = trigger;
+    }
+
+    public State getSource() {
+        return source;
+    }
+
+    public State getTarget() {
+        return target;
+    }
+
+    public Event getTrigger() {
+        return trigger;
+    }
+
+    public String getEventCode() {
+        return trigger.getCode();
+    }
+}
+```
+
+状态机保存了其起始状态。
+
+```java
+class StateMachine...
+    private State start;
+
+    public StateMachine(State start) {
+        this.start = start;
+    }
+```
+
+这样，从这个状态可以到达状态机里的任何状态
+
+```java
+class StateMachine...
+    public Collection<State> getStates() {
+        List<State> result = new ArrayList<State>();
+        collectState(result, start);
+        return result;
+    }
+
+    private void collectStates(Collection<State> result, State s) {
+        if (result.contains(s)) return;
+        result.add(s);
+        for (State next : s.getAllTargets())
+            collectStates(result, next);
+    }
+
+class State...
+    Collection<State> getAllTargets() {
+        List<State> result = new ArrayList<State>();
+        for (Transtion t : transitions.values())
+            result.add(t.getTarget());
+        return result;
+    }
+```
+
+为了重置事件，在状态机上保存了一个列表。
+
+```java
+class StateMachine...
+    private List<Event> resetEvents = new ArrayList<Event>();
+
+    public void addResetEvents(Event... events) {
+        for (Event e : events) 
+            resetEvents.add(e);
+    }
+```
+
+像这样用一个单独结构处理重置事并不是必需的。简单🉐地在状态机上声明一些额外的转换，也可以处理这种情况，如下所示：
+
+```java
+class StateMachine...
+    private void addResetEvent_byAddingTransitions(Event e) {
+        for (State s : getStates()) 
+            if (!s.hasTransition(e.getCode(), s.addTransition(e,start)));
+    }
+```
+
+倾向于在状态机上设置显式的重置事件，这样可以更好地表现意图。虽然这样做确实使状态机有点复杂，但它也更加清晰地表现出通用状态机该如何运作，要定义特定状态机也会更加清晰。
+
+处理完结构，再来看看行为。事实证明，这真的相当简单。控制器有个handle方法，它以从设备接收到的事件代码为参数。
+
+```java
+class Controller...{
+    private State currentState;
+    private StateMachine machine;
+
+    public CommandChannel getCommandChannel() {
+        return commandsChannel;
+    }
+
+    private CommandChannel commandsChannel;
+
+    public void handle(String eventCode) {
+        if (currentState.hasTransition(eventCode))
+            transitionTo(currentState.targetState(eventCode));
+        else if (machine.isResetEvent(eventCode))
+            transitionTo(machine.getStart());
+        // ignore unknown events
+    }
+
+    private void trasitionTo(State target) {
+        currentState = target;
+        currentState.executeActions(commandsChannel);
+    }
+}
+class State {
+    public boolean hasTransition(String eventCode) {
+        return transtions.containsKey(eventCode);
+    }
+
+    public State targetState(String eventCode) {
+        return transtions.get(eventCode).getTarget();
+    }
+
+    public void executeActions(CommandChannel commandsChannel) {
+        for (Command c : actions) commandChannel.send(c.getCode());
+    }
+}
+class StateMachine... {
+    public boolean isResetEvent(String eventCode) {
+        return resetEventCode().contains(eventCode);
+    }
+}
+```
+
+对于未在状态上注册的事件，它会直接忽略。对于可识别的任何事件，它就会转换为目标状态，并执行这个目标状态上定义的命令。
+
+### 1.3 控制器编写程序
+
+<!-- DSL看到了第33页-->
 
 ### 1.3 为格兰特小姐的控制器编写程序
 
