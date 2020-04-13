@@ -2502,3 +2502,889 @@ def walk_stack(f):
 ## 第4部分：CPython中的对象
 
 CPython附带了一些基本类型，例如**字符串**，**列表**，**元组**，**字典**和**对象**。
+
+所有这些类型都是内置的，不需要从标准库中导入任何库。同样地，这些内置类型的实例化具有一些方便的快捷方式。
+
+比如列表
+
+```py
+lst = list()
+lst = []
+```
+
+可以使用双引号或单引号从字符串字面量实例化字符串。之前探讨了语法定义，这些定义使编译器将双引号解释为字符串文字。Python中的所有类型均继承自object内置基本类型。甚至字符串，元组和列表都从继承object。在C代码的遍历过程中，已经阅读了许多有关`PyObject*`C的API 引用object。
+
+因为C不是像Python那样面向对象的，所以C中的对象不会彼此继承。PyObject是Python对象内存开始处的数据结构。
+
+许多基本对象API函数都在`Objects/object.c`中声明，例如`PyObject_Repr`内置`repr()`函数，还可以找到`PyObject_Hash()`和其他API。
+
+通过在Python对象上实现“dunder”方法，可以在自定义对象中覆盖所有这些功能：
+
+```py
+class MyObject(object): 
+    def __init__(self, id, name):
+        self.id = id
+        self.name = name
+
+    def __repr__(self):
+        return "<{0} id={1}>".format(self.name, self.id)
+```
+
+`PyObject_Repr()`代码在`Objects/object.c`内部实现。目标对象的类型v将通过对`Py_TYPE()`的调用来推断，如果`tp_repr`设置了该字段，则将调用函数指针。如果`tp_repr`未设置该字段，即该对象未声明自定义`__repr__`方法，则将运行默认行为，该行为将返回`"<%s object at %p>"`类型名称和ID：
+
+```cpp
+PyObject *
+PyObject_Repr(PyObject *v)
+{
+    PyObject *res;
+    if (PyErr_CheckSignals())
+        return NULL;
+...
+    if (v == NULL)
+        return PyUnicode_FromString("<NULL>");
+    if (Py_TYPE(v)->tp_repr == NULL)
+        return PyUnicode_FromFormat("<%s object at %p>",
+                                    v->ob_type->tp_name, v);
+
+...
+}
+```
+
+给定`PyObject*`的字段`ob_type`将指向在`Include/cpython/object.h`中定义的数据结构`PyTypeObject`。该数据结构列出了所有内置函数，作为字段和它们应接收的参数。以tp_repr为例：
+
+```cpp
+typedef struct _typeobject {
+    PyObject_VAR_HEAD
+    const char *tp_name; /* For printing, in format "<module>.<name>" */
+    Py_ssize_t tp_basicsize, tp_itemsize; /* For allocation */
+
+    /* Methods to implement standard operations */
+...
+    reprfunc tp_repr;
+```
+
+其中`reprfunc`是`typedef`用于`PyObject *(*reprfunc)(PyObject *)`;，即需要1个指向函数`PyObject（self）`。
+
+一些dunder API是可选的，因为它们仅适用于某些类型，例如数字：
+
+```cpp
+/* Method suites for standard classes */
+PyNumberMethods *tp_as_number;
+PySequenceMethods *tp_as_sequence;
+PyMappingMethods *tp_as_mapping;
+```
+
+像列表这样的序列将实现以下方法：
+
+```cpp
+typedef struct {
+    lenfunc sq_length; // len(v)
+    binaryfunc sq_concat; // v + x
+    ssizeargfunc sq_repeat; // for x in v
+    ssizeargfunc sq_item; // v[x]
+    void *was_sq_slice; // v[x:y:z]
+    ssizeobjargproc sq_ass_item; // v[x] = z
+    void *was_sq_ass_slice; // v[x:y] = z
+    objobjproc sq_contains; // x in v
+
+    binaryfunc sq_inplace_concat;
+    ssizeargfunc sq_inplace_repeat;
+} PySequenceMethods;
+```
+
+所有这些内置函数都称为Python数据模型。Luciano Ramalho的“ Fluent Python”是Python数据模型的重要资源之一。
+
+### 基础对象类型
+
+在中`Objects/object.c`，`objecttype`的基本实现被编写为纯C代码。基本逻辑有一些具体的实现，例如浅比较。并非Python对象中的所有方法都属于数据模型，因此Python对象可以包含属性（类或实例属性）和方法。考虑Python对象的一种简单方法包括两件事：
+
+* 核心数据模型，带有指向已编译函数的指针
+* 具有任何自定义属性和方法的字典
+
+核心数据模型在`PyTypeObject`中定义，而函数在中定义：
+
+* `Objects/object.c` 用于内置方法
+* `Objects/boolobject.c`用于`bool`类型
+* `Objects/bytearrayobject.c`用于`byte[]`类型
+* `Objects/bytesobjects.c`用于`bytes`类型
+* `Objects/cellobject.c`用于`cell`类型
+* `Objects/classobject.c`用于抽象`class`类型，用于元编程
+* `Objects/codeobject.c`用于内置`code`对象类型
+* `Objects/complexobject.c`用于复数数字类型
+* `Objects/iterobject.c` 用于迭代器
+* `Objects/listobject.c`用于`list`类型
+* `Objects/longobject.c`用于`long`数字类型
+* `Objects/memoryobject.c` 用于基本内存类型
+* `Objects/methodobject.c` 用于类方法类型
+* `Objects/moduleobject.c` 用于模块类型
+* `Objects/namespaceobject.c` 用于名称空间类型
+* `Objects/odictobject.c` 用于有序字典类型
+* `Objects/rangeobject.c` 用于范围发生器
+* `Objects/setobject.c`一set型
+* `Objects/sliceobject.c` 用于切片参考类型
+* `Objects/structseq.c`一`struct.Struct`类型
+* `Objects/tupleobject.c`一`tuple`类型
+* `Objects/typeobject.c`一`type`类型
+* `Objects/unicodeobject.c`一`str`类型
+* `Objects/weakrefobject.c`用于一个`weakref`对象
+
+### 布尔和长整数类型
+
+**bool类型**是最直接的实现内置类型。它继承自`long`并具有预定义的常量`Py_True`和`Py_False`。这些常量是不可变的实例，是在Python解释器的实例中创建的。
+
+```cpp
+PyObject *PyBool_FromLong(long ok)
+{
+    PyObject *result;
+
+    if (ok)
+        result = Py_True;
+    else
+        result = Py_False;
+    Py_INCREF(result);
+    return result;
+}
+```
+
+此函数使用数字类型的C评估来分配结果`Py_True`或`Py_False`对结果进行计数，并使**引用计数器**递增。
+
+对于布尔逻辑功能`and`，`xor`以及`or`实现的，但加法，减法和除法属于`long`类型，因为它根本没有任何意义分隔两个布尔值。
+
+实施and了bool值检查a和b被布尔值，然后检查他们的引用Py_True，以及and运行操作上的两个数字：
+
+```cpp
+static PyObject *
+bool_and(PyObject *a, PyObject *b)
+{
+    if (!PyBool_Check(a) || !PyBool_Check(b))
+        return PyLong_Type.tp_as_number->nb_and(a, b);
+    return PyBool_FromLong((a == Py_True) & (b == Py_True));
+}
+```
+
+**long类型**稍微复杂一点，因为内存需求量很大。在从Python 2到3的过渡中，CPython放弃了对该int类型的支持，而是将long类型用作主要的整数类型。Python的long类型非常特别，因为它可以存储可变长度的数字。最大长度在编译的二进制文件中设置。
+
+Python的数据结构long由PyObject公共头和数字列表组成。数字列表`ob_digit`最初设置为一个数字，但在初始化时后来扩展为更长的长度：
+
+```cpp
+Python的数据结构long由PyObject标题和数字列表组成。数字列表ob_digit最初设置为一个数字，但在初始化时后来扩展为更长的长度：
+```
+
+内存long通过分配给新的`_PyLong_New()`。此函数采用固定长度，并确保小于`MAX_LONG_DIGITS`。然后，它重新分配内存ob_digit以匹配长度。
+
+要将C long类型转换为Python long类型，请将C 类型long转换为数字列表，long分配Python的内存，然后设置每个数字。因为long已经初始化ob_digit为长度为1，如果数字小于10，那么将在不分配内存的情况下设置该值：
+
+```cpp
+PyObject *
+PyLong_FromLong(long ival)
+{
+    PyLongObject *v;
+    unsigned long abs_ival;
+    unsigned long t;  /* unsigned so >> doesn't propagate sign bit */
+    int ndigits = 0;
+    int sign;
+
+    CHECK_SMALL_INT(ival);
+...
+    /* Fast path for single-digit ints */
+    if (!(abs_ival >> PyLong_SHIFT)) {
+        v = _PyLong_New(1);
+        if (v) {
+            Py_SIZE(v) = sign;
+            v->ob_digit[0] = Py_SAFE_DOWNCAST(
+                abs_ival, unsigned long, digit);
+        }
+        return (PyObject*)v;
+    }
+...
+    /* Larger numbers: loop to determine number of digits */
+    t = abs_ival;
+    while (t) {
+        ++ndigits;
+        t >>= PyLong_SHIFT;
+    }
+    v = _PyLong_New(ndigits);
+    if (v != NULL) {
+        digit *p = v->ob_digit;
+        Py_SIZE(v) = ndigits*sign;
+        t = abs_ival;
+        while (t) {
+            *p++ = Py_SAFE_DOWNCAST(
+                t & PyLong_MASK, unsigned long, digit);
+            t >>= PyLong_SHIFT;
+        }
+    }
+    return (PyObject *)v;
+}
+```
+
+要将双精度浮点转换为Python long，请PyLong_FromDouble()执行以下数学操作：
+
+```cpp
+PyObject *
+PyLong_FromDouble(double dval)
+{
+    PyLongObject *v;
+    double frac;
+    int i, ndig, expo, neg;
+    neg = 0;
+    if (Py_IS_INFINITY(dval)) {
+        PyErr_SetString(PyExc_OverflowError,
+                        "cannot convert float infinity to integer");
+        return NULL;
+    }
+    if (Py_IS_NAN(dval)) {
+        PyErr_SetString(PyExc_ValueError,
+                        "cannot convert float NaN to integer");
+        return NULL;
+    }
+    if (dval < 0.0) {
+        neg = 1;
+        dval = -dval;
+    }
+    frac = frexp(dval, &expo); /* dval = frac*2**expo; 0.0 <= frac < 1.0 */
+    if (expo <= 0)
+        return PyLong_FromLong(0L);
+    ndig = (expo-1) / PyLong_SHIFT + 1; /* Number of 'digits' in result */
+    v = _PyLong_New(ndig);
+    if (v == NULL)
+        return NULL;
+    frac = ldexp(frac, (expo-1) % PyLong_SHIFT + 1);
+    for (i = ndig; --i >= 0; ) {
+        digit bits = (digit)frac;
+        v->ob_digit[i] = bits;
+        frac = frac - (double)bits;
+        frac = ldexp(frac, PyLong_SHIFT);
+    }
+    if (neg)
+        Py_SIZE(v) = -(Py_SIZE(v));
+    return (PyObject *)v;
+}
+```
+
+其余的实现函数在`longobject.c`中，例如使用将Unicode字符串转换为数字`PyLong_FromUnicodeObject()`。
+
+### 迭代器和生成器类型
+
+Python生成器是返回`yield`语句的函数，可以连续调用以生成更多值。yield使用时，生成器对象将代替值返回return。生成器对象是从yield语句创建的，并返回给调用方。
+
+创建一个包含4个常量值列表的简单生成器：
+
+```py
+>>> def example():
+...   lst = [1,2,3,4]
+...   for i in lst:
+...     yield i
+... 
+>>> gen = example()
+>>> gen
+<generator object example at 0x100bcc480>
+```
+
+如果浏览生成器对象的内容，则可以看到一些以`gi_`开头的字段：
+
+```py
+>>> dir(gen)
+[ ...
+ 'close', 
+ 'gi_code', 
+ 'gi_frame', 
+ 'gi_running', 
+ 'gi_yieldfrom', 
+ 'send', 
+ 'throw']
+```
+
+`PyGenObject`类型在`Include/genobject.h`定义并且有3种类型：
+
+* 生成器对象
+* 协程对象
+* 异步生成器对象
+
+这三个共享生成器中使用相同字段子集，并且具有相似的行为。首先关注生成器，可以看到以下字段：
+
+* gi_frame链接到PyFrameObject生成器的a，在执行章节的前面，探讨了在框架的值堆栈内使用locals和globals的方法。这是生成器记住局部变量的最后一个值的方式，因为帧在调用之间是持久的
+* gi_running 如果生成器当前正在运行，则设置为0或1
+* gi_code链接到PyCodeObject产生生成器的已编译函数，以便可以再次调用它
+* gi_weakreflist 链接到生成器函数内部对象的弱引用列表
+* gi_name 作为生成器的名称
+* gi_qualname 作为生成器的合格名称
+* gi_exc_state 如果生成器调用引发异常，则将其作为异常数据的元组
+
+协程生成器和异步生成器具有相同的字段，但分别带有前缀`cr_`和`ag_`。
+
+如果调用生成器对象的`__next__()`，则会产生下一个值，直到最终引发`StopIteration`为止：
+
+```py
+>>> gen.__next__()
+1
+>>> gen.__next__()
+2
+>>> gen.__next__()
+3
+>>> gen.__next__()
+4
+>>> gen.__next__()
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+StopIteration
+```
+
+每次调用`__next__()`时，生成器`gi_code`字段内的代码对象将作为新帧执行，并将返回值压入值堆栈。
+
+还可以通过导入`dis`模块并反汇编其中的字节码来查看生成器函数的已编译代码对象：
+
+```py
+>>> gen = example()
+>>> import dis
+>>> dis.disco(gen.gi_code)
+  2           0 LOAD_CONST               1 (1)
+              2 LOAD_CONST               2 (2)
+              4 LOAD_CONST               3 (3)
+              6 LOAD_CONST               4 (4)
+              8 BUILD_LIST               4
+             10 STORE_FAST               0 (l)
+
+  3          12 SETUP_LOOP              18 (to 32)
+             14 LOAD_FAST                0 (l)
+             16 GET_ITER
+        >>   18 FOR_ITER                10 (to 30)
+             20 STORE_FAST               1 (i)
+
+  4          22 LOAD_FAST                1 (i)
+             24 YIELD_VALUE
+             26 POP_TOP
+             28 JUMP_ABSOLUTE           18
+        >>   30 POP_BLOCK
+        >>   32 LOAD_CONST               0 (None)
+             34 RETURN_VALUE
+```
+
+每当`__next__()`方法在生成器对象`gen_iternext()`上调用时，都会通过生成器实例进行调用，生成器实例立即调用在`Objects/genobject.c`中的`gen_send_ex()`。
+
+`gen_send_ex()`是将生成器对象转换为下一个产生结果的函数。这与`Python/ceval.c`中从代码对象构造框架的方式有许多相似之处，因为这些函数具有相似的任务。
+
+`gen_send_ex()`函数与生成器，协程和异步生成器共享，并具有以下步骤：
+
+1. 获取当前线程状态
+
+2. 从生成器对象中获取框架对象
+
+3. 如果__next__()调用时生成器正在运行，抛出ValueError
+
+4. 如果生成器内部的框架位于堆栈的顶部：
+
+* 对于协程，如果协程尚未标记为关闭，则引发RuntimeError
+* 如果这是一个异步生成器，抛出一个 StopAsyncIteration
+* 对于标准生成器，StopIteration被抛出。
+
+5. 如果帧（f->f_lasti）中的最后一条指令由于刚刚开始而仍为-1，并且它是协程或异步生成器，则不能将非无值作为参数传递，因此引发异常
+
+6. 否则，这是第一次被调用，并且允许使用参数。参数的值被推入框架的值堆栈
+
+7. f_back帧的字段是向其发送返回值的调用方，因此将其设置为线程中的当前帧。这意味着返回值被发送给调用者，而不是生成器的创建者
+
+8. 生成器被标记为正在运行
+
+9. 生成器的异常信息中的最后一个异常是从线程状态中的最后一个异常复制而来的
+
+10. 线程状态异常信息设置为生成器的异常信息的地址。这意味着，如果调用者在生成器执行过程中输入一个断点，则堆栈跟踪将遍历生成器，并且有问题的代码将被清除
+
+11. 生成器内部的帧在Python/ceval.c主执行循环中执行，并返回值
+
+12. 线程状态最后一个异常重置为调用框架之前的值
+
+13. 生成器被标记为未运行
+
+14. 然后，以下情况将返回值与调用生成器引发的任何异常匹配。请记住，生成器StopIteration在耗尽时应手动或通过不产生值来提高a 。协程和异步生成器不应：
+
+* 如果框架未返回任何结果，为生成器引发StopIteration；为异步生成器引发StopAsyncIteration
+* 如果StopIteration被显式引发 ，但是这是协程或异步生成器，则抛出RuntimeError，因为不允许这样做
+* 如果StopAsyncIteration被显式引发 ，并且这是异步生成器，则抛出RuntimeError，因为不允许这样做
+
+15. 最后返回结果给调用者 `__next__()`
+
+```cpp
+static PyObject *
+gen_send_ex(PyGenObject *gen, PyObject *arg, int exc, int closing)
+{
+    PyThreadState *tstate = _PyThreadState_GET();       // 1.
+    PyFrameObject *f = gen->gi_frame;                   // 2.
+    PyObject *result;
+
+    if (gen->gi_running) {     // 3.
+        const char *msg = "generator already executing";
+        if (PyCoro_CheckExact(gen)) {
+            msg = "coroutine already executing";
+        }
+        else if (PyAsyncGen_CheckExact(gen)) {
+            msg = "async generator already executing";
+        }
+        PyErr_SetString(PyExc_ValueError, msg);
+        return NULL;
+    }
+    if (f == NULL || f->f_stacktop == NULL) { // 4.
+        if (PyCoro_CheckExact(gen) && !closing) {
+            /* `gen` is an exhausted coroutine: raise an error,
+               except when called from gen_close(), which should
+               always be a silent method. */
+            PyErr_SetString(
+                PyExc_RuntimeError,
+                "cannot reuse already awaited coroutine"); // 4a.
+        }
+        else if (arg && !exc) {
+            /* `gen` is an exhausted generator:
+               only set exception if called from send(). */
+            if (PyAsyncGen_CheckExact(gen)) {
+                PyErr_SetNone(PyExc_StopAsyncIteration); // 4b.
+            }
+            else {
+                PyErr_SetNone(PyExc_StopIteration);      // 4c.
+            }
+        }
+        return NULL;
+    }
+
+    if (f->f_lasti == -1) {
+        if (arg && arg != Py_None) { // 5.
+            const char *msg = "can't send non-None value to a "
+                              "just-started generator";
+            if (PyCoro_CheckExact(gen)) {
+                msg = NON_INIT_CORO_MSG;
+            }
+            else if (PyAsyncGen_CheckExact(gen)) {
+                msg = "can't send non-None value to a "
+                      "just-started async generator";
+            }
+            PyErr_SetString(PyExc_TypeError, msg);
+            return NULL;
+        }
+    } else { // 6.
+        /* Push arg onto the frame's value stack */
+        result = arg ? arg : Py_None;
+        Py_INCREF(result);
+        *(f->f_stacktop++) = result;
+    }
+
+    /* Generators always return to their most recent caller, not
+     * necessarily their creator. */
+    Py_XINCREF(tstate->frame);
+    assert(f->f_back == NULL);
+    f->f_back = tstate->frame;                          // 7.
+
+    gen->gi_running = 1;                                // 8.
+    gen->gi_exc_state.previous_item = tstate->exc_info; // 9.
+    tstate->exc_info = &gen->gi_exc_state;              // 10.
+    result = PyEval_EvalFrameEx(f, exc);                // 11.
+    tstate->exc_info = gen->gi_exc_state.previous_item; // 12.
+    gen->gi_exc_state.previous_item = NULL;             
+    gen->gi_running = 0;                                // 13.
+
+    /* Don't keep the reference to f_back any longer than necessary.  It
+     * may keep a chain of frames alive or it could create a reference
+     * cycle. */
+    assert(f->f_back == tstate->frame);
+    Py_CLEAR(f->f_back);
+
+    /* If the generator just returned (as opposed to yielding), signal
+     * that the generator is exhausted. */
+    if (result && f->f_stacktop == NULL) {  // 14a.
+        if (result == Py_None) {
+            /* Delay exception instantiation if we can */
+            if (PyAsyncGen_CheckExact(gen)) {
+                PyErr_SetNone(PyExc_StopAsyncIteration);
+            }
+            else {
+                PyErr_SetNone(PyExc_StopIteration);
+            }
+        }
+        else {
+            /* Async generators cannot return anything but None */
+            assert(!PyAsyncGen_CheckExact(gen));
+            _PyGen_SetStopIterationValue(result);
+        }
+        Py_CLEAR(result);
+    }
+    else if (!result && PyErr_ExceptionMatches(PyExc_StopIteration)) { // 14b.
+        const char *msg = "generator raised StopIteration";
+        if (PyCoro_CheckExact(gen)) {
+            msg = "coroutine raised StopIteration";
+        }
+        else if PyAsyncGen_CheckExact(gen) {
+            msg = "async generator raised StopIteration";
+        }
+        _PyErr_FormatFromCause(PyExc_RuntimeError, "%s", msg);
+
+    }
+    else if (!result && PyAsyncGen_CheckExact(gen) &&
+             PyErr_ExceptionMatches(PyExc_StopAsyncIteration))  // 14c.
+    {
+        /* code in `gen` raised a StopAsyncIteration error:
+           raise a RuntimeError.
+        */
+        const char *msg = "async generator raised StopAsyncIteration";
+        _PyErr_FormatFromCause(PyExc_RuntimeError, "%s", msg);
+    }
+...
+
+    return result; // 15.
+}
+```
+
+回到对代码对象的评估（无论何时调用函数或模块），在其中中都有特殊的生成器，协程和异步生成器`_PyEval_EvalCodeWithName()`。此函数会检查`CO_GENERATOR`，`CO_COROUTINE`和`CO_ASYNC_GENERATOR`标志代码对象。
+
+使用`PyCoro_New()`创建新的协程时，将使用`PyAsyncGen_New()`或使用`PyGen_NewWithQualName()`来创建新的异步生成器。这些对象较早返回，而不是返回评估的帧，这就是为什么在使用yield语句调用函数后获得生成器对象的原因：
+
+```cpp
+PyObject *
+_PyEval_EvalCodeWithName(PyObject *_co, PyObject *globals, PyObject *locals, ...
+...
+    /* Handle generator/coroutine/asynchronous generator */
+    if (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR)) {
+        PyObject *gen;
+        PyObject *coro_wrapper = tstate->coroutine_wrapper;
+        int is_coro = co->co_flags & CO_COROUTINE;
+        ...
+        /* Create a new generator that owns the ready to run frame
+         * and return that as the value. */
+        if (is_coro) {
+            gen = PyCoro_New(f, name, qualname);
+        } else if (co->co_flags & CO_ASYNC_GENERATOR) {
+            gen = PyAsyncGen_New(f, name, qualname);
+        } else {
+            gen = PyGen_NewWithQualName(f, name, qualname);
+        }
+        ...
+        return gen;
+    }
+...
+```
+
+遍历AST并看到`yieldor yield from`语句或看到`coroutine`装饰器后，编译器将代码对象中的标志注入。
+
+`PyGen_NewWithQualName()`将`gen_new_with_qualname()`使用生成的框架进行调用，然后`PyGenObject`使用`NULL`值和已编译的代码对象创建：
+
+```cpp
+static PyObject *
+gen_new_with_qualname(PyTypeObject *type, PyFrameObject *f,
+                      PyObject *name, PyObject *qualname)
+{
+    PyGenObject *gen = PyObject_GC_New(PyGenObject, type);
+    if (gen == NULL) {
+        Py_DECREF(f);
+        return NULL;
+    }
+    gen->gi_frame = f;
+    f->f_gen = (PyObject *) gen;
+    Py_INCREF(f->f_code);
+    gen->gi_code = (PyObject *)(f->f_code);
+    gen->gi_running = 0;
+    gen->gi_weakreflist = NULL;
+    gen->gi_exc_state.exc_type = NULL;
+    gen->gi_exc_state.exc_value = NULL;
+    gen->gi_exc_state.exc_traceback = NULL;
+    gen->gi_exc_state.previous_item = NULL;
+    if (name != NULL)
+        gen->gi_name = name;
+    else
+        gen->gi_name = ((PyCodeObject *)gen->gi_code)->co_name;
+    Py_INCREF(gen->gi_name);
+    if (qualname != NULL)
+        gen->gi_qualname = qualname;
+    else
+        gen->gi_qualname = gen->gi_name;
+    Py_INCREF(gen->gi_qualname);
+    _PyObject_GC_TRACK(gen);
+    return (PyObject *)gen;
+}
+```
+
+综上所述，可以看到**生成器表达式**是一种强大的语法，其中单个关键字，`yield`触发整个流程以创建唯一对象，将已编译的代码对象复制为属性，设置框架以及在其中存储变量列表当地范围。
+
+对于生成器表达式的用户而言，这一切似乎都是神奇的，但是从本质上讲，它并不那么复杂。
+
+### 第4部分小结
+
+在探索Python类时，请务必记住存在用C编写的内置类型以及从这些类型继承的用Python或C编写的类。
+
+一些库具有用C编写的类型，而不是继承自内置类型。一个示例是numpy，用于数字数组的库。该nparray类型用C编写，高效且高效。
+
+在下一部分中将探讨标准库中定义的类和函数。
+
+## 第5部分：CPython标准库
+
+使用标准的CPython发行版，存在用于处理文件，线程，网络，网站，音乐，键盘，屏幕，文本以及各种实用程序的库。
+
+CPython标准库中有两种类型的模块：
+
+* 使用纯Python编写的实用程序
+* 用C包装的Python包装器
+
+### Python模块
+
+用纯Python编写的模块都位于Lib/源代码的目录中。一些较大的模块（例如模块）在子文件夹中具有子email模块。
+
+一个简单的模块是colorsys模块。仅有几百行Python代码。可能以前从未遇到过。该colorsys模块具有一些用于转换色阶的实用程序功能。
+
+从源代码安装Python发行版时，标准库模块从该Lib文件夹复制到发行文件夹中。启动Python时，此文件夹始终是路径的一部分，因此可以import不必担心模块的位置。
+
+例如：
+
+```py
+>>> import colorsys
+>>> colorsys
+<module 'colorsys' from '/usr/shared/lib/python3.7/colorsys.py'>
+
+>>> colorsys.rgb_to_hls(255,0,0)
+(0.0, 127.5, -1.007905138339921) 
+```
+
+可以看到`rgb_to_hls()`的源代码在`Lib/colorsys.py`：
+
+```py
+# HLS: Hue, Luminance, Saturation
+# H: position in the spectrum
+# L: color lightness
+# S: color saturation
+
+def rgb_to_hls(r, g, b):
+    maxc = max(r, g, b)
+    minc = min(r, g, b)
+    # XXX Can optimize (maxc+minc) and (maxc-minc)
+    l = (minc+maxc)/2.0
+    if minc == maxc:
+        return 0.0, l, 0.0
+    if l <= 0.5:
+        s = (maxc-minc) / (maxc+minc)
+    else:
+        s = (maxc-minc) / (2.0-maxc-minc)
+    rc = (maxc-r) / (maxc-minc)
+    gc = (maxc-g) / (maxc-minc)
+    bc = (maxc-b) / (maxc-minc)
+    if r == maxc:
+        h = bc-gc
+    elif g == maxc:
+        h = 2.0+rc-bc
+    else:
+        h = 4.0+gc-rc
+    h = (h/6.0) % 1.0
+    return h, l, s
+```
+
+这个函数没有什么特别的，只是标准的Python。将在所有纯Python标准库模块中找到类似的内容。它们只是用普通的Python编写，布局合理且易于理解。甚至可以发现改进或错误，因此可以对其进行更改并将其贡献给Python发行版。
+
+### Python和C模块
+
+其余模块用C结合Python或纯C编写。这些模块的源代码Lib/包含在Python组件和Modules/C组件中。该规则有两个例外，即模块`sys`位于`Python/sysmodule.c`中，模块`__builtins__`模块和位于`Python/bltinmodule.c`中。
+
+Python会`import * from __builtins__`当解释器被实例化，因此，所有的功能，如`print()`，`chr()`，`format()`在`Python/bltinmodule.c`中。
+
+由于`sys`模块非常适用于解释器和CPython的内部，因此可以Python直接在内部找到。它也被标记为CPython的“实现细节”，在其他发行版中找不到。
+
+内置`print()`函数可能是在Python中学习要做的第一件事。那么当调用`print("hello world!")`会发生什么呢？
+
+1. 该参数已由编译"hello world"器从字符串常量转换为`PyUnicodeObject`
+2. `builtin_print()` 用1个参数执行，并且为NULL kwnames
+3. 该file变量被设置为`PyId_stdout`，系统的`stdout`句柄
+4. 每个参数都传递到`file`
+5. 换行，\n传递到`file`
+
+```cpp
+static PyObject *
+builtin_print(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
+{
+    ...
+    if (file == NULL || file == Py_None) {
+        file = _PySys_GetObjectId(&PyId_stdout);
+        ...
+    }
+    ...
+    for (i = 0; i < nargs; i++) {
+        if (i > 0) {
+            if (sep == NULL)
+                err = PyFile_WriteString(" ", file);
+            else
+                err = PyFile_WriteObject(sep, file,
+                                         Py_PRINT_RAW);
+            if (err)
+                return NULL;
+        }
+        err = PyFile_WriteObject(args[i], file, Py_PRINT_RAW);
+        if (err)
+            return NULL;
+    }
+
+    if (end == NULL)
+        err = PyFile_WriteString("\n", file);
+    else
+        err = PyFile_WriteObject(end, file, Py_PRINT_RAW);
+    ...
+    Py_RETURN_NONE;
+}
+```
+
+用C编写的某些模块的内容公开了操作系统函数。由于CPython源代码需要编译为macOS，Windows，Linux和其他基于* nix的操作系统，因此存在一些特殊情况。
+
+该time模块是一个很好的例子。Windows在操作系统中保留和存储时间的方式与Linux和macOS根本不同。这是操作系统之间时钟功能的精度不同的原因之一。
+
+在`Modules/timemodule.c`中，基于Unix的系统的操作系统时间函数从`<sys/times.h>`导入：
+
+```cpp
+#ifdef HAVE_SYS_TIMES_H
+#include <sys/times.h>
+#endif
+...
+#ifdef MS_WINDOWS
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include "pythread.h"
+#endif /* MS_WINDOWS */
+...
+```
+
+在文件的后面，`time_process_time_ns()`被定义为以下内容的包装器`_PyTime_GetProcessTimeWithInfo()`：
+
+```cpp
+static PyObject *
+time_process_time_ns(PyObject *self, PyObject *unused)
+{
+    _PyTime_t t;
+    if (_PyTime_GetProcessTimeWithInfo(&t, NULL) < 0) {
+        return NULL;
+    }
+    return _PyTime_AsNanosecondsObject(t);
+}
+```
+
+`_PyTime_GetProcessTimeWithInfo()`可以在源代码中以多种不同方式实现，但是取决于操作系统，只有某些部分被编译为模块的二进制文件。Windows系统调用`GetProcessTimes()`而Unix系统调用`clock_gettime()`。
+
+具有相同API的多个实现的其他模块是线程模块，文件系统模块和网络模块。由于操作系统的行为方式不同，因此CPython源代码将尽最大可能实现相同的行为，并使用一致的抽象API将其公开。
+
+### CPython回归测试套件
+
+CPython有一个强大而广泛的测试套件，涵盖了Windows和Linux / macOS的核心解释器，标准库，工具和发行版。
+
+测试套件位于Lib/testPython 中，几乎完全用Python编写。
+
+完整的测试套件是一个Python包，因此可以使用编译的Python解释器运行。将Lib目录更改为目录并运行python -m test -j2，其中j2表示要使用2个CPU。
+
+在Windows上，使用rt.batPCBuild文件夹中的脚本，确保已预先从Visual Studio 构建了Release配置：
+
+```sh
+$ cd PCbuild
+$ rt.bat -q
+
+C:\repos\cpython\PCbuild>"C:\repos\cpython\PCbuild\win32\python.exe"  -u -Wd -E -bb -m test
+== CPython 3.8.0b4
+== Windows-10-10.0.17134-SP0 little-endian
+== cwd: C:\repos\cpython\build\test_python_2784
+== CPU count: 2
+== encodings: locale=cp1252, FS=utf-8
+Run tests sequentially
+0:00:00 [  1/420] test_grammar
+0:00:00 [  2/420] test_opcodes
+0:00:00 [  3/420] test_dict
+0:00:00 [  4/420] test_builtin
+...
+```
+
+在Linux上：
+
+```sh
+$ cd Lib
+$ ../python -m test -j2   
+== CPython 3.8.0b4
+== macOS-10.14.3-x86_64-i386-64bit little-endian
+== cwd: /Users/anthonyshaw/cpython/build/test_python_23399
+== CPU count: 4
+== encodings: locale=UTF-8, FS=utf-8
+Run tests in parallel using 2 child processes
+0:00:00 load avg: 2.14 [  1/420] test_opcodes passed
+0:00:00 load avg: 2.14 [  2/420] test_grammar passed
+...
+```
+
+在macOS上：
+
+```sh
+$ cd Lib
+$ ../python.exe -m test -j2   
+== CPython 3.8.0b4
+== macOS-10.14.3-x86_64-i386-64bit little-endian
+== cwd: /Users/anthonyshaw/cpython/build/test_python_23399
+== CPU count: 4
+== encodings: locale=UTF-8, FS=utf-8
+Run tests in parallel using 2 child processes
+0:00:00 load avg: 2.14 [  1/420] test_opcodes passed
+0:00:00 load avg: 2.14 [  2/420] test_grammar passed
+...
+```
+
+有些测试需要某些标志。否则将被跳过。例如，许多IDLE测试都需要GUI。
+
+要查看配置中的测试套件列表，请使用--list-tests标志：
+
+```sh
+$ ../python.exe -m test test_webbrowser
+
+Run tests sequentially
+0:00:00 load avg: 2.74 [1/1] test_webbrowser
+
+== Tests result: SUCCESS ==
+
+1 test OK.
+
+Total duration: 117 ms
+Tests result: SUCCESS
+```
+
+还可以使用-v参数查看对结果执行的测试的详细列表：
+
+```sh
+$ ../python.exe -m test test_webbrowser -v
+
+== CPython 3.8.0b4 
+== macOS-10.14.3-x86_64-i386-64bit little-endian
+== cwd: /Users/anthonyshaw/cpython/build/test_python_24562
+== CPU count: 4
+== encodings: locale=UTF-8, FS=utf-8
+Run tests sequentially
+0:00:00 load avg: 2.36 [1/1] test_webbrowser
+test_open (test.test_webbrowser.BackgroundBrowserCommandTest) ... ok
+test_register (test.test_webbrowser.BrowserRegistrationTest) ... ok
+test_register_default (test.test_webbrowser.BrowserRegistrationTest) ... ok
+test_register_preferred (test.test_webbrowser.BrowserRegistrationTest) ... ok
+test_open (test.test_webbrowser.ChromeCommandTest) ... ok
+test_open_new (test.test_webbrowser.ChromeCommandTest) ... ok
+...
+test_open_with_autoraise_false (test.test_webbrowser.OperaCommandTest) ... ok
+
+----------------------------------------------------------------------
+
+Ran 34 tests in 0.056s
+
+OK (skipped=2)
+
+== Tests result: SUCCESS ==
+
+1 test OK.
+
+Total duration: 134 ms
+Tests result: SUCCESS
+```
+
+如果希望对CPython进行更改，那么了解如何使用测试套件并检查已编译版本的状态非常重要。在开始进行更改之前，应该运行整个测试套件并确保一切都通过了。
+
+### 安装自定义版本
+
+在源存储库中，如果对更改感到满意并想在系统中使用它们，则可以将其安装为自定义版本。
+
+对于macOS和Linux，可以使用以下altinstall命令，该命令不会为其创建符号链接python3并安装独立版本：
+
+```sh
+$ make altinstall
+```
+
+对于Windows，必须将构建配置从更改Debug为Release，然后将打包的二进制文件复制到计算机上系统路径下的目录中。
+
+
