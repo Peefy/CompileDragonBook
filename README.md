@@ -8,9 +8,7 @@
 
 ## 其他笔记
 
-* [CPython笔记](https://github.com/Peefy/CompileDragonBook.Cpp/blob/master/doc/CPython_Note.md)
-
-* [《You Guide to the CPython Source Code》笔记](https://github.com/Peefy/CompileDragonBook.Cpp/blob/master/doc/YouGuide2CPython.md)
+* [CPython 笔记](https://github.com/Peefy/CompileDragonBook.Cpp/blob/master/doc/YouGuide2CPython.md)
 
 * [Peefy Complier](https://github.com/Peefy/PeefyCompiler)
 
