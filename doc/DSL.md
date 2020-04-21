@@ -1148,16 +1148,88 @@ JMock使用了渐进式接口。采用这种方式，with只能出现在method�
 ### 10.3 CSS
 
 CSS在声明式计算模型方面是一个好例子，这种计算模型不同于命令式模型。只要声明HTML元素的匹配规则即可。
-
+ 
 SASS是另一种类似于CSS的DSL，生成CSS作为输出。SASS提供了数学运算和变量。在CSS块结构上加入语法上的换行和缩进。在一种DSL之上构建另外一种DSL，提供底层DSL缺失的抽象。上层的DSL应该类似于底层的DSL，上层DSL的用户也都能够理解底层的DSL。
-
-<!-- DSL看到了第144页-->
 
 ### 10.4 HQL
 
+Hibernate是一个广泛应用的对象-关系映射系统，可以将Java类映射到关系数据库的表上。HQL(Hibernate查询语言)提供了这样一种能力，在Java类上以类似于SQL的方式编写查询语句，映射到真实数据库的SQL查询上。
+
+```hql
+select person from Person person, Calendar calendar
+where calander.holidays['national day'] = person.birthday
+    and person.nationality.calendar = calendar
+```
+
+HQL处理的本质是，将HQL查询翻译成SQL查询：
+
+* 用**语法指导翻译**和**树的构建**将HQL输入文本转换为HQL的抽象语法树
+* 把HQL的AST转换为SQL的AST
+* 代码生成器根据SQL的AST生成SQL
+
+所有这些情况都用到了ANTLR。除了可以用标记流作为ANTLR语法分析器的输入，还可以用AST作为ANTLR的输入。ANTLR的树构建语法HQL和SQL的AST时都有用到。
+
+这个转换的路径`输入文本-输入AST->输出AST->输出文本->输出文本`，对于源码到源码转换很常用。
+
 ### 10.5 XAML
 
+XAML是C# WPF等UI布局的一种DSL，XAML就是XML文件，用来布局对象结构：使用WPF，可以布局屏幕。
+
+```xaml
+<?xml version="1.0" encoding="UTF-8"?>
+<ContentView xmlns="http://xamarin.com/schemas/2014/forms"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml" 
+    xmlns:binders="clr-namespace:DuGu.XFLib.Binders"
+    xmlns:duguctrls="clr-namespace:DuGu.XFLib.Controls"
+    xmlns:carView="clr-namespace:CarouselView.FormsPlugin.Abstractions;assembly=CarouselView.FormsPlugin.Abstractions"
+    xmlns:ffimg="clr-namespace:FFImageLoading.Forms;assembly=FFImageLoading.Forms"
+    xmlns:fftrans="clr-namespace:FFImageLoading.Transformations;assembly=FFImageLoading.Transformations"
+    x:Class="QZhiHuFind.Views.DailyView"
+    BackgroundColor="#E2DFED">
+    <ContentView.Resources>
+        <ResourceDictionary>
+            <Style TargetType="ffimg:CachedImage">
+                <Setter Property="DownsampleToViewSize" Value="true"/>
+                <Setter Property="CacheDuration" Value="7" />
+                <Setter Property="DownsampleUseDipUnits" Value="true" />
+                <Setter Property="ErrorPlaceholder" Value="ic_placeholder.jpg" />
+                <Setter Property="LoadingPlaceholder" Value="ic_placeholder.jpg" />
+            </Style>
+        </ResourceDictionary>
+    </ContentView.Resources>
+	<ListView
+        x:Name="ItemsListView"
+        binders:ListViewBinder.ItemTappedCommand="{Binding ItemSelectedCommand}"
+        binders:ListViewBinder.LoadMoreCmd="{Binding LoadMoreCommand}"
+        BackgroundColor="#E2DFED"
+        CachingStrategy="RecycleElement"
+        HasUnevenRows="True"
+        IsPullToRefreshEnabled="True"
+        IsRefreshing="{Binding IsBusy, Mode=TwoWay}"
+        ItemsSource="{Binding Items}"
+        RefreshCommand="{Binding RefreshCommand}"
+        SeparatorVisibility="None"
+        VerticalOptions="FillAndExpand">
+        <ListView.Header>
+...
+...
+```
+
+在屏幕布局方面，这种做法HTML非常类似。
+
+从逻辑上说，XAML文档定义了一个C#类，这里确实会用到代码生成。生成的代码是**部分类(C#语言特性)**。
+
 ### 10.6 FIT
+
+FIT是测试框架，其目标是，以领域专家可以理解的方式，描述测试场景。随后的许多工具扩展了这个基本的想法，尤其是Fitnesse。
+
+如果把FIT当作一种DSL，它的很多方面都很有趣：FIT的核心是提供一种记法，让非程序员也能够很容易地用表格形式指定示例值。所以，FIT程序就是一堆表格，典型的做法是嵌套在HTML页面里。表格之间可以放置其他HTML元素，这些元素都会当做注释。这样，领域专家就可以用平实的叙述方式描述他们想要的东西，表格就提供了可处理的部分。
+
+FIT表格可以采用不同的形式，其本质就是一种简单的命令式语言。它简单到没有条件，没有循环，只有一堆动词。
+
+每个表格同一个夹具相关联，将动词翻译成系统行为。check这个动词比较特殊，只是用来执行比较的。当运行表格时，会产生一个HTML输出，同输入页面完全一样，只会根据比较匹配与否，将check行标上颜色，或绿或红。
+
+<!-- DSL看到了第148页-->
 
 ### 10.7 Make
 
