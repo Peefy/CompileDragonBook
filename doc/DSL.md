@@ -1670,15 +1670,259 @@ class Notification {
 
 ### 17.1 工作原理
 
-<!-- DSL看到了第186页-->
+分隔符指导翻译的工作原理是在获取输入后，基于分隔符将其分解成小块。可以使用任何字符作为分隔字符，但是最常用的分隔符是行尾符。
+
+把脚本分解成行通常相当简单，因为多数编程环境都有程序类库，一次一行地读取输入流。还可以使用续行符，表示不同行之间是同一行。
+
+```
+score 300 for 3 nights at Bree
+score 200 for 2 nights at Dol
+score 150 for 2 nights at Orthanc
+```
+
+每一行都是称作是自洽的，因为任何一行都不会影响其他行。可以重新排列甚至删除任何行而不会影响解释其他行。它们形式相同,因为每一行编码同种类的消息。所以处理起来相当简单，对每一行执行相同的行处理函数，函数会找到需要的信息，并转换为需要的表达方式。如果使用**嵌入式语法翻译**，意味着把它放入**语义模型**。如果使用**树的构建**，意味着创建一个抽象的语法树。很少见到在分隔符指导翻译时使用树的构建。
+
+如何找出需要的信息依赖于语言中字符串处理的能力，以及需要处理的行的复杂度。在可能的情况下，最简单的方式是使用字符串分隔函数。大多数字符串类库都有这样的函数，可以通过分隔字符把字符串分隔成多个元素。
+
+有时字符串的分解方式不会很清晰，最好的方式是使用**正则表达式**，可以在正则表达式中使用分组来提取需要的字符。正则表达式比分隔符字符串强大的多，
+
+使用分隔符指导翻译处理飞自洽的语句会更加复杂，因为必须保留解析的一些状态信息。一个例子就是状态机，解决这个问题的好办法是，对解析的每种状态有一组不同的解析器。于是状态机解析器有一个顶层的行解析器，并对命令块，事件块，重置事件块和状态块有进一步的行解析器。
 
 ### 17.2 使用场景
  
+分隔符指导翻译的最大优点是非常简单易用。它的主要替代方案，“语法指导翻译”，需要客服一定的学习曲线才能理解如何使用语法。
+
+这种方法的缺点是难以处理更复杂的语言。因此，只有当面对简单的自洽语句，或者只有一个嵌套上下文时，建议选择分隔符指导翻译。
+
 ### 17.3 常客记分（C#）
 
-### 17.4 
+#### 语义模型
+
+DSL如下：
+
+```dsl
+300 for stay 3 nights at Bree
+150 per day for stay 2 nights at Bree
+50 for spa treatment at Dol Amroth
+60 for stay 1 night at Otthanc or Helm's Deep or Dunharrow
+1 per dollar for dinner at Bree
+```
+
+脚本的每一行代表一行奖励。奖励的主要职责是记录常客活动的基本。活动用来简单地描述数据：
+
+```cs
+class Activity {
+    public string Type {get;set;}
+    public int Amount {get;set;}
+    public int Revenue {get;set;}
+    public string Location {get;set;}
+}
+```
+
+奖励包括三个组件，`LocationSpecification`查看活动发生的地方是否合适；活动规范查看活动是否值得奖励；如果这两个规范都满足，Reward对象计算分数。
+
+这三个组件中最简单的是位置规范。只需要检查酒店的名称是否包含在已有的酒店列表中：
+
+```cs
+class LocationSpecification {
+    private readonly IList<Hotel> hotels = new List<Hotel>();
+
+    public LocationSpecification(params String[] names) {
+        foreach (string n in names) {
+            hotels.Add(Repository.HotelNamed(n));
+        }
+    }
+
+    public bool IsSatisfiedBy(Activity a) {
+        Hotel hotel = Repository.HotelNamed(a.Location);
+        return hotels.Contains(hotel);
+    }
+}
+```
+
+这里需要两种类型的活动规范。一个活动规范肩擦好保持的事件不能少于规定的时间。
+
+```cs
+abstract class ActivitySpecification {
+    public abstract bool isStatisfiedBy(Activity a);
+}
+
+class MinimumNightStayActivitySpec : ActivitySpecification {
+    private readonly int minimumNumberOfNights;
+
+    public MinimumNightStayActivitySpec(int numberOfNights) {
+        this.minimumNumberOfNights = numberOfNights;
+    }
+    
+    public override bool isStatisfiedBy(Activity a) {
+        return a.Type == "stay" 
+            ? a.Amount >= minimumNumberOfNights
+            : false;
+    } 
+}
+```
+
+第二个活动规范检查活动的类型必须正确
+
+```cs
+class TypeActivitySpec : ActivitySpecification {
+    private readonly string type;
+
+    public TypeActivitySpec(string type) {
+        type = type;
+    }
+
+    public override bool isStatisfiedBy(Activity a) {
+        return a.Type == type;
+    } 
+}
+```
+
+Reward类根据不同的基准保存积分
+
+```cs
+class Reward {
+    protected int points;
+    public Reward(int points) {
+        this.points = points
+    }
+    virtual public int Score (Activity activity) {
+        return points;
+    }
+}
+
+class RewardPerDay : Reward {
+    public RewardPerDay(int points) : base(points) {}
+
+    public override int Score (Activity activity) {
+        if (activity.TYpe != "stay")
+            throw new ArgumentException("can only use per day scores on stays");
+        return activity.Amount * points;
+    }
+}
+
+class RewardPerDollar : Reward {
+    public RewardPerDollar(int points) : base(points) {}
+
+    public override int Score (Activity activity) {
+        return activity.Revenue * points;
+    }
+}
+```
+
+#### 解析器
+
+解析器的基本结构是读取每一行输入并处理。这个例子，支持使用`&`作为续航符。一个简单的递归函数就可以工作。当解析行时，首先去除注释，忽略空行。完成以后，开始正确解析，把解析工作委托给一个新的对象：
+
+```cs
+class OffsetScriptParser {
+    readonly TextReader input;
+    readonly List<Offer> result = new List<Offer>();
+    public OffsetScriptParser(TextReader input) {
+        this.input = input;
+    }
+    public List<Offer> Run() {
+        string line;
+        while ((line = input.ReadLine()) != null) {
+            line = appendCoutinuingLine(line);
+            parseLine(line);
+        }
+        return result;
+    }
+    string appendCoutinuingLine(string line) {
+        if (IsContinueLine(line)) {
+            var first = Regex.Replace(line, @"&\s*$", "");
+            var next = input.ReadLine();
+            if (null == next) 
+                throw;
+            return first.Trim() + " " + appendCoutinuingLine(next);
+        }
+        return line.Trim();
+    }
+    bool IsContinueLine(string line) {
+        return Regex.IsMatch(line, @"&\s*$");
+    }
+    void ParseLine(string line) {
+        line = removeComment(line);
+        if (IsEmpty(line))
+            return;
+        result.Add(new OffsetLineParser().Parse(line.Trim()))
+    }
+    bool IsEmpty(string line) {
+        return Regex.IsMatch(line, @"^\s*$");
+    }
+    string removeComment(string line) {
+        return Regex.IsMatch(line, @"#.*", "");
+    }
+}
+```
+
+基本的解析方法把行分解成子句，并对每个子句调用不同的解析函数。这个方法的核心行为是把正则表达式分解成组，然后分组解析后映射到结果中。在组的定义和使用上有很强的语义关联。
+
+```cs
+class OffsetLineParser {
+    public Offer Parse(string line) {
+        var result = new Offer();
+
+        const string rewardRegexp = @"?<reward>.*";
+        const string activityRegexp = @"?<activity>.*";
+        const string locationRegexp = @"?<location>.*";
+
+        var source = rewardRegexp + keywordToken("for") + 
+            activityRegexp + keywordToken("at") + locationRegexp;
+
+        var m = new Regex(source).Match(line);
+
+        result.Reward = parseReward(m.Groups["reward"].Value);
+        result.Location = parseLocation(m.Groups["location"].Value);
+        result.Activity = parseActivity(m.Groups["activity"].Value);
+    }
+    string keywordToken(string keyword) {
+        return @"\s+" + keyword + @"\s+";
+    }
+    LocationSpecification parseLocation(string input) {
+        if (Regex.IsMatch(input, @"\bor\b"))
+            return parseMultipleHotels(input);
+        return new LocationSpecification(input);
+    }
+    ActivitySpecification parseActivity(string input) {
+        if (input.StartWith("stay"))
+            return parseStayActivity(input);
+        return new TypeActivitySpec(input);
+    }
+    LocationSpecification parseMultipleHotels(string input) {
+        string[] hotelNames = Regex.Split(input, @"\s+or+\s+");
+        return new LocationSpecification(hotelNames);
+    }
+    ActivitySpecification parseStayActivity(input) {
+        const string stayKeyword = @"^stay\s+";
+        const string nightsKeyword = @"\s+nights?$";
+        const string amount = @"(?<amount>\d+)";
+        const string source = stayKeyword + amount + nightsKeyword;
+
+        var m = Regex.Match(input, source);
+        if (!m.Success) 
+            throw;
+        return new MinimumNightStayActivitySpec(Int32.Parse(m.Groups["amount"].Value));
+    }
+    Reward parseReward(string input) {
+        if (Regex.IsMatch(input, @"^\d+$"))
+            return new Reward(int.Parse(input));
+        else if (Regex.IsMatch(input, @"^\d+ per day$"))
+            return new RewardPerDay(int.Parse(extractDigits(input)));
+        else if (Regex.IsMatch(input, @"^\d+ per dollar$"))
+            return new RewardPerDollar(int.Parse(extractDigits(input)));
+        throw;
+    }
+    string extractDigits(string input) {
+        return Regex.Match(input, @"^\d+").Value;
+    }
+}
+```
 
 ## 第18章 语法指导翻译
+
+<!-- DSL看到了第201页-->
 
 ### 18.1 工作原理
 
