@@ -1437,13 +1437,142 @@ class TaskLoader {
 
 ### 12.4 在一个内部DSL中使用符号键（Ruby）
 
-<!-- DSL看到了第159页-->
+符号表来自解析领域，但对内部DSL同样有用。下面是一个简单的DSL脚本，描述了早餐任务及其前置条件：
+
+```dsl
+task :go_to_work => [:drink_coffee, :dress]
+task :drink_coffee => [:make_coffee, :wash]
+task :dress => [:wash]
+```
+
+在DSL中，每个任务都可以通过Ruby的符号数据类型引用。任务列表用“函数序列”声明，每个任务的细节用**Literal Map**来展示。
+
+**语义模型**描述起来很简单，就是一个任务类。
+
+```ruby
+class Task
+    attr_reader : name
+    attr_accessor : prerequisites
+
+    def initialize name, *prereqs
+        @name = name
+        @prerequisites = prereqs
+    end
+
+    def to_s    
+        name
+    end
+end
+```
+
+DSL脚本由**表达式生成器**负责读取，用到了**对象范围**和instance_eval
+
+```ruby
+class TaskBuilder
+    def load aStream
+        instance_eval aStream
+        return self
+    end
+```
+
+符号表就是个简单的字典
+
+```ruby
+class TaskBuilder
+    def initialize
+        @task = {}
+    end
+```
+
+任务子句以一个哈希表作为实参，用于组装任务信息。
+
+```ruby
+class TaskBuilder...
+    def task argMap
+        raise "syntax error" if argMap.keys.size != 1
+        key = argMap.keys[0]
+        newTask = obtain_task(key)
+        prereqs = argMap[key].map{|s| obtain_task(s)}
+        newTask.prerequistes = prereqs
+    end
+    def obtain_task aSymbol
+        @task[aSymbol] = Task.new(aSymbol.to_s) unless @task[aSymbol]
+        return @task[aSymbol]
+    end
+end
+```
+
+用符号实现的符号表和使用字符串作为标志符是一样的。然而，如果支持的话，请使用符号。
 
 ### 12.5 用枚举作为静态类型符号（Java）
+
+```java
+public enum TaskName {
+    wash, dress, make_coffee, drink_coffee, go_to_work
+}
+```
+
+任务依赖可以这样定义：
+
+```dsl
+builder = new TaskBuilder() {{
+    task(wash);
+    task(dress).needs(wash);
+    task(make_coffee);
+    task(drink_coffee).needs(make_coffee, wash);
+    task(go_to_work).needs(drink_coffee, dress);
+}};
+```
+
+借助枚举的方式很简单，而且不会强迫使用继承，或者在编写DSL脚本代码时有所限制，并且时优于“类符号表”的地方。
+
+使用这种方法，如果这些符号对应于一些外部数据源，那么应该有一个步骤，读取外部数据源，用代码生成枚举声明，这样没所有一切就可以保持同步。
+
+这样实现的后果时，所有的符号都在一个命名空间。对于多个脚本需要共享同一套符号的情况，这没什么问题，但有时候，希望不同的脚本可以使用不同的符号。
+
+假设有两套任务，一套用于早晨的任务，另一套用于铲雪。当完成早晨的任务时，希望IDE只把它们提供给我；对于铲雪任务，也是一样的道理。实现的方法是：根据接口来定义任务生成器，然后，让枚举实现这个接口。
+
+```java
+public interface TaskName {}
+
+class TaskBuilder {
+    PrerequisiteClause task(TaskName name) {
+        registerTask(name);
+        return new PrerequisiteClause(this, tasks.get(name));
+    }
+    private void registerTask(TaskName name) {
+        if (!task.containsKey(name)) {
+            tasks.put(name, new Task(name.toString()));
+        }
+    }
+    private Map<TaskName, Task> tasks = new HashMap<TaskName, Task>();
+}
+```
+
+然后，定义一些枚举，根据特定的任务使用特定的枚举，选择性地导入所需的枚举即可。
+
+```java
+import static path.io.ShovelTasks.*;
+
+enum ShoveTasks implements TaskName {
+    shobel_path, shobel_drive, shovel_sidewalk, make_out_chocolate
+}
+
+builder = new TaskBuilder() {{
+    task(shovel_path);
+    task(shovel_drive).needs(shovel_path);
+    task(shovel_sidewalk);
+    task(make_hot_chocolate).needs(shovel_drive, shovel_sidewalk);
+}}
+```
+
+如果要进行更多的静态类型控制，可以创建一个通用版本的任务生成器，检查其是否使用了正确的TaskName子类型。但是，如果主要感兴趣的是良好的IDE可用性，那么选择导入恰当的枚举，这就够了。
 
 ## 第13章 语境变量
 
 ### 13.1 工作原理
+
+<!-- DSL看到了第163页-->
 
 ### 13.2 使用场景
 
