@@ -30,7 +30,7 @@ stmts -> stmts stmt | e
 
 对这两者进行衡量，可知使用面向对象方法会使得改变或增加一个构造(比如for语句)，变得更容易；而使用面向步骤的方法会使得改变或增加一个步骤(比如类型检查)变得比较容易。使用对象来实现时，增加一个新的构造可以通过写一个自包含的类来实现；但是如果要改变一个步骤，比如插入自动类型转换的代码，就需要改变所有受影响的类。使用面向步骤的方式时，增加一个新的构造可能会引起各个步骤中的多个过程的改变。
 
-```
+```bnf
 stmt -> loc = bool;
     | if (bool) stmt
     | if (bool) stmt else stmt
@@ -43,7 +43,7 @@ loc -> loc[bool] | id;
 
 表达式的产生式处理了运算符的结合性和优先级，它们对每个优先级级别都使用了一个非终结符号，而非终结符号factor用来表示括号中的表达式，标识符，数组引用和常量。
 
-```
+```bnf
 bool -> bool || join | join
 join -> join && equality | equality
 equality -> equality == rel | equality != rel | rel
