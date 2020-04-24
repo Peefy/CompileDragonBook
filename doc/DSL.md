@@ -2446,9 +2446,215 @@ class StateMachineParser {
 }
 ```
 
-<!-- DSL看到了第227页-->
+当语法解析成功时，startParser方法还会负责创建状态机对象。其余方法唯一剩下的操作是为状态机设置重置事件。
+
+这个状态机的文法规则是由不同块组成的一个简单序列。
+
+```
+grammer file
+    stateMachine: eventBlock optionalResetBlock optionalCommandBlock stateList
+```
+
+最上层的函数是状态机中不同组件构成的一个序列。
+
+```java
+class StateMachineParser {
+    private boolean stateMachine() {
+        boolean parseSuccess = false;
+        if (eventBlock()) {
+            if (optionalResetBlock()) {
+                if (optionalCommandBlock()) {
+                    if (stateList()) {
+                        parseSuccess = true;
+                    }
+                }
+            }
+        }
+        return parseSuccess;
+    }
+}
+```
+
+将使用事件的声明来说明这些函数是如何在一起工作的。第一个产生的是表明事件定义块的结构，主要由一个序列组成。
+
+```
+grammer file
+    eventBlock: eventKeyword eventDecList endKeyword
+```
+
+下面的代码按照前面所介绍的模式来实现，注意其中是如何保存缓冲区中的初始位置信息的，当匹配失败时会还原它。
+
+```java
+class StateMachineParser {
+    private boolean eventBlock() {
+        Token t;
+        boolean parseSuccess = false;
+        int save = tokenBuffer.getCurrentPositions();
+        t = tokenBuffer.nextToken();
+        if (t.isTokenType(ScannerPatterns.TokenTypes.TT_EVENT)) {
+            tokenBuffer.popToken();
+            parseSuccess = eventDecList();
+        }
+        if (parseSuccess) {
+            t = tokenBuffer.nextToken();
+            if (t.isTokenType(ScannerPatterns.TokenTypes.TT_END)) {
+                tokenBuffer.popToken();
+            }
+            else {
+                parseSuccess = false;
+            }
+        }
+        if (!parseSuccess) {
+            tokenBuffer.resetCurrentPosition(save);
+        }
+        return parseSuccess;
+    }
+}
+```
+
+事件列表的语法规则定义非常直观：
+
+```
+grammer file...
+    eventDecList: eventDec+
+```
+
+eventDecList函数严格按照前面介绍的模式来实现，具体的匹配操作在eventDec函数中执行。
+
+```java
+class StateMachineParser {
+    int save = tokenBuffer.getCurrentPosition();
+    boolean parseSuccess = false;
+
+    if (eventDec()) {
+        parseSuccess = true;
+        while (parseSuccess) {
+            parseSuccess = eventDec();
+        }
+        parseSuccess = true;
+    }
+    else {
+        tokenBuffer.resetCurrentPosition(save);
+    }
+    return parseSuccess;
+}
+```
+
+事件定义的匹配是重点，它的文法定义很直观:
+
+```
+grammer file...
+    eventDec: identifier identifier
+```
+
+这段代码也保存了缓冲区中的初始标识位置信息，当匹配成功后，还会创建状态机模型。
+
+```java
+class StateMachineParser {
+    private boolean eventDoc() {
+        Token t;
+        boolean parseSuccess = false;
+        int save = tokenBuffer.getCurrentPosition();
+        t = tokenBuffer.nextToken();
+        String elementLeft = "";
+        String elementRight = "";
+
+        if (t.isTokenType(ScannerPatterns.TokenTypes.TT_IDENTIFIER)) {
+            elementLeft = consumeIdentifier(t);
+            t = tokenBuffer.nextToken();
+            if (t.isTokenType(ScannerPatterns.TokenTypes.TT_IDENTIFIER)) {
+                elementRight = consumeIdentifier(t);
+                parseSuccess = true;
+            }
+        }
+
+        if (parseSuccess) {
+            makeEventDec(elementLeft, elementRight);
+        } else {
+            tokenBuffer.resetCurrentPosition(save);
+        }
+        return parseSuccess;
+    }
+}
+```
+
+这里需要对两个助手函数进行进一步的解释。第一个是consumeIdentifier，它将缓冲区位置前进一位，并从缓冲区中获取下一个标识符的标记值。因此它可以用来填充事件声明。
+
+```java
+class StateMachineParser {
+    private String consumeIdentifier(Token t) {
+        String identName = t.tokenValue;
+        tokenBuffer.popToken();
+        return identName;
+    }
+}
+```
+
+另一个助手函数是`makeEventDec`,它通过事件的名称和代码来填充事件声明。
+
+```java
+class StateMachineParser {
+    private void makeEventDec(String left, String right) {
+        machineEvents.add(new Event(left, right));
+    }
+}
+```
+
+从功能来说，最大的难点是对于状态的处理。标识状态迁移的对象可能会引用尚不存在的状态，因此助手函数必须允许对于未定义状态的引用。对于所有不使用**树的构建**的实现来说，都需要面对这个问题。
+
+最后再来看看`optionalResetBlock`函数是如何实现文法规则的。
+
+```
+grammer file
+    optionalResetBlock: (resetBlock)?
+    resetBlock: resetKeyword (resetEvent)* endKeyword
+    resetEvent: identifier
+```
+
+因为这个文法规则太简单了，所以就不严格按照前面解释的模式来实现它，而是把`resetBlock`和`optionalResetBlock`合并在一起实现。
+
+```java
+class StateMachineParser {
+    boolean optionalResetBlock() {
+    int save = tokenBuffer.getCurrentPosition();
+    boolean parseSuccess = true;
+    Token t = tokenBuffer.nextToken();
+
+    if (t.isTokenType(ScannerPatterns.TokenTypes.TT_RESET)) {
+        tokenBuffer.popToken();
+        t = tokenBuffer.nextToken();
+        parseSuccess = true;
+        while (!(t.isTokenType(ScannerPatterns.TokenTypes.TT_END)) & (parseSuccess) ) {
+            parseSuccess = resetEvent();
+            t = tokenBuffer.nextToken();
+        }
+        if (parseSuccess) {
+            tokenBuffer.popToken();
+        } else {
+            tokenBuffer.resetCurrentPosition(save);
+        }
+    }
+    return parseSuccess;
+    }
+    boolean resetEvent() {
+        Token t;
+        boolean parseSuccess = false;
+        t = tokenBuffer.nextToken();
+
+        if (t.isTokenType(ScannerPatterns.TokenTypes.TT_IDENTIFIER)) {
+            resetEvents = true;
+            tokenBuffer.popToken();
+        }
+        return parseSuccess;
+    }
+}
+```
+
+如果reset关键字不存在，这个方法仍然会返回true，因为整个块是可选的。如果reset关键字存在，那么它必须有零或多个事件声明，这组声明之后要跟随end关键字。如果不是这样，该块的匹配就会失败，函数会返回false。
 
 ## 第22章 解析器组合子
+
+<!-- DSL看到了第231页-->
 
 ### 22.1 工作原理
 
