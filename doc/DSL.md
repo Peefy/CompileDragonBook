@@ -2170,13 +2170,119 @@ BNF提供了一种为语言定义语法结构的方式，**解析器生成器**�
 
 考虑到DSL的语法都很简单，这个方法也可以用于处理整个DSL。
 
-### 词法分析器的一个例子
+### 词法分析器的一个例子（Java）
 
-<!-- DSL看到了第220页-->
+状态机文法的词法分析器是个很典型的例子。所需的标记包括关键字、标点符号、标识符的标记类型、空格和注释。使用`java.util.regex`来指定模式并自动完成匹配。词法分析器的输入是DSL脚本，输出则是标记缓冲区----它们将成为语法分析器的输入。
+
+它的实现分为两个部分：指定需要识别的标记和词法分析算法本身。这样做可以简化向词法分析器添加新标记类型的动作。使用枚举类型来表示标记的类型，它包含相应的正则表达式和布尔值----控制标记的输出。
+
+```java
+class ScannerPatterns {
+    public enum TokenTypes {
+        TT_EVENT("^events", true),
+        TT_RESET("^resetEvents", true),
+        TT_COMMANDs("^commands", true),
+        TT_END("^end", true),
+        TT_STATE("^state", true),
+        TT_ACTIONS("^actions", true),
+        TT_LEFT("^\\{", true),
+        TT_RIGHT("^\\", true),
+        TT_TRANSITION("^=>", true),
+        TT_IDENTIFIER("^(\\w)+", true),
+        TT_WHITESPACE("^(\\s)+", true),
+        TT_COMMENT("^\\\\(.)*$", false),
+        TT_EOF("^EOF", false);
+
+        private final String regExPattern;
+        private final Boolean outputToken;
+
+        TokenTypes(String regexPattern, Boolean output) {
+            this.regExPattern = regexPattern;
+            this.outputToken = output;
+        }
+    }
+}
+```
+
+在这个词法分析器中，实例化识别对象表。这通过编译的识别器及其标记类型和布尔值完成。
+
+```java
+class ScannerPatterns {
+    public static ArrayList<ScanRecognizer> LoadPatterns() {
+        Pattern pattern;
+        for (TokenTypes t : TokenTypes.values()) {
+            pattern = Pattern.compile(t.regExPattern);
+            patternMatchers.add(new ScanRecognizer(t, pattern, t.outputToken));
+        }
+        return patternMatchers;
+    }
+}
+```
+
+为了词法分析器定了一个类，它的实例变量包含识别器、输入字符串和输出标记列表。
+
+```java
+class StateMachineTokenizer {
+    private String scannerBuffer;
+    private ArrayList<Token> tokenList;
+    private ArrayList<ScanRecognizer> recognizerPatterns;
+}
+```
+
+词法分析器的主处理循环是个`do-while`循环
+
+```java
+class StateMachineTokenizer {
+    while (parseInProgress) {
+        Iterator<ScanRecognizer> patternIterator = recognizerPatterns.iterator();
+        parseInProgress = matchToken(patternIterator);
+    }
+}
+```
+
+这个循环持续地调用标记匹配方法，直到所有缓冲区都耗尽或者无法在剩余缓冲区中匹配到相应的标记时结束。
+
+`matchToken`方法一次遍历各个识别器并尝试匹配单个标记。
+
+```java
+private boolean matchToken(Iterator<ScanRecognizer> patternIterator) {
+    boolean tokenMatch;
+    ScanRecognizier recognizer;
+    Pattern pattern;
+    Matcher matcher;
+    boolean result;
+    tokenMatch = false;
+    result = true;
+
+    do {
+        recognizer = patternIterator.next();
+        pattern = recognizer.tokenPattern;
+        matcher = pattern.matcher(scannerBuffer);
+        if (matcher.find()) {
+            if (recognizer.outputToken) {
+                tokenList.add(new Token(recognizer.token, matcher.group()));
+            }
+            tokenMatch = true;
+            scannerBuffer = scannerBuffer.substring(matcher.end());
+        }
+        while (patternIterator.hasNext() && (!tokenMatch));
+        if ((!tokenMatch) || matcher.end() == scannerBuffer.length() ) {
+            result = false;
+        }
+        return result;
+    }
+}
+```
+
+如果匹配成功，将输入缓冲区指向匹配结果结束的位置，在这段代码里，是通过调用`matcher.end()`来获取这个位置的。检查匹配的识别器的布尔标记以决定是否为匹配结果产生标记。如果没有匹配成功就会产生错误：`regex API`提供的`find`将会扫描到字符结束，如果无法找到匹配结果，整个词法分析就会失败。
+
+如果内层循环能够匹配标记，那么外层循环就会持续进行到字符串结束。为了保证所有的标记模式都能够进行匹配，迭代器在内层循环结束的时候会重置。词法分析的结果是标记缓冲区，其中每个标记又会具有相应的标记类型和词法分析器中匹配的实际字符串值。
 
 ## 第21章 递归下降法语法解析器
 
 ### 21.1 工作原理
+
+<!-- DSL看到了第223页-->
 
 ### 21.2 使用场景
 
