@@ -2934,21 +2934,114 @@ eventDec : name=ID code=ID -> ^(EVENT_DEC $name $code);
 
 ## 第25章 嵌入式语法翻译
 
-<!-- DSL看到了第268页-->
+当使用语法指导翻译时，语法分析器只产生内部语法分析树，因而需要多一些努力才能生成语义模型。通过将代码嵌入语法分析器中，语法分析器在分析过程中的适合时刻组装语义模型，嵌入式语法翻译可以用于生成语义模型。
 
 ### 25.1 工作原理
 
+语法分析主要关乎语法结构的识别。当使用嵌入式语法翻译时，将生成**语义模型**的代码放置在语法分析器中，随着语法分析的进行，可以逐渐产生语义模型。绝大多数情况下，需要在输入语言的子句被识别出来的地方放入模型填充代码，不过当实际情况需要时，也可以在其他地方放置它们。
+
+当结合解析器生成器使用嵌入式语法翻译时，通常会发现生成代码会以**外加代码**的形式出现。大部分解析器生成器都支持外加代码的使用。
+
+带有副作用的代码会给嵌入式语法翻译的使用带来问题，经常会在非预期的情况下执行，而具体的执行行为则取决于语法分析算法如何识别语法规则，由于副作用的存在，这可能会搞乱环境中的其他变量的值。而使用树的构建则不会有这个问题，因为它只会产生某个子树的值。
+
 ### 25.2 使用场景
+
+嵌入式语法翻译最有吸引力的地方在于，提供一种简单的方式，可以在一遍处理中同时处理语法分析和模型的生成。而使用树的构建则需要提供生成抽象语法树的代码，以及根据AST生成模型的代码。
+
+嵌入式语法翻译最大的问题在于，它会使文法文件变得很复杂，尤其是外加代码没有很好地使用的时候。
+
+嵌入式语法翻译很好地符合了单遍语法分析的要求，所有工作都可以在语法分析阶段完成。但这意味这某些工作在嵌入式语法翻译中会变得很困难。
+
+### 25.3 示例（Java和ANTLR）
+
+<!-- 待补充-->
 
 ## 第26章 内嵌解释器
 
+内嵌解释器在文法分析的过程中解析DSL脚本，因而使得文法解析的结果就是脚本的执行结果。
+
 ### 26.1 工作原理
+
+内嵌解释器通过尽可能早地计算DSL表达式，收集结果并将这些最终结果返回。内嵌解释器不实用语义模型，而是直接在DSL的输入上完成解释过程。随着语法分析器解析出DSL脚本的每个片段，解释器就会对这些片段进行解释。
 
 ### 26.2 使用场景
 
-### 26.3 计算器
+当需要计算的表达式很简单的时候，可能会非常有用。即使是一个很小的DSL，通过创建语义模型并解释它，也会比直接在语法分析器里做所有事情容易的多。
+
+### 26.3 计算器（Java和ANTLR）
+
+计算器可能是用于阐明内嵌解释器的最好例子，它的每一个表达式都很简单，可以很容易地解释，结果也很容易组合在一起。此外，数学表达式的语法树本身就是一个很好的语义模型，不必为它再单独创建一个语义模型。
+
+从最顶层的语法规则开始，因为算术表达式是递归的，所以ANTLR需要一个顶层语法规则作为文法分析的起始点。
+
+```
+grammer "Arith.g" ......
+    prog returns [double result] : e=expression {$result = $e.result;};
+```
+
+为了ANTLR文法文件创造一个简单的Java包装类，并从这个类中调用刚才定义的顶层语法规则:
+
+```java
+class Calculator {
+    public static double evaluate(String expression) {
+        try {
+            Lexer lexer = new ArithLexer(new ANTLRReaderStream(new StringReader(expression)));
+            ArithParser parser = new ArithPaser(new CommandTokenStream(lexer));
+            return paeser.prog();
+        }
+        catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        catch (RecognitionException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+由于嵌套的运算符表达式特性，需要从优先级最低的运算符开始，在这个例子里是加法和减法。
+
+```antlr
+grammer "Arith.g"
+    expression returns [double result]
+      : a=multi_exp {$result = $a.result;}
+        ( '+' b=mult_exp {$result += $b.result;}
+        | '-' b=mult_exp {$result -= $b.result;}
+        )
+    ;
+```
+
+这段代码展示了计算器的一般模式，每一条语法规则识别一个运算符，然后执行一段内嵌的Java代码来完成计算。其余部分和这个模式类似。
+
+```antlr
+grammer "Arith.g"
+    power_exp returns [double result]
+      : a=unary_exp {$result = $a.result;}
+        ( '**' b=mult_exp {$result = Math.pow($result, $b.result);}
+        | '//' b=mult_exp {$result = Math.pow($result, 1.0 / $b.result);}
+        )
+    ;
+
+    unary_exp returns [double result]
+      : '-' a=unary_exp {$result = -$a.result;}
+      | a=factor_exp {$result = $a.result;}
+      ;    
+
+    factor_exp returns [double result]
+      : n=NUMBER {$result = Double.parseDouble($n.text);}
+      | a=par_exp {$result = $a.result;}
+      ;     
+
+    par_exp returns [double result]
+      : '(' a=expression ')' {$result = $a.result;}
+      ;
+```
+
+这个计算器非常简单，它的结构和语法树非常一致，因此甚至不需要使用嵌入助手。
 
 ## 第27章 外加代码
+
+<!-- DSL看到了第273页-->
 
 ### 27.1 工作原理
 
