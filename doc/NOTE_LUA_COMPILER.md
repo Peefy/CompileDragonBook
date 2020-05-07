@@ -440,19 +440,69 @@ Lua主函数
 ```cpp
 int main (int argc, char **argv) {
   int status, result;
-  lua_State *L = luaL_newstate();  /* create state */
-  if (L == NULL) {
+  lua_State *L = luaL_newstate();  /* create state */  //创建状态机，一个堆栈模型
+  if (L == NULL) {   // 内存分配失败，报告错误并退出
     l_message(argv[0], "cannot create state: not enough memory");
     return EXIT_FAILURE;
   }
-  lua_pushcfunction(L, &pmain);  /* to call 'pmain' in protected mode */
-  lua_pushinteger(L, argc);  /* 1st argument */
-  lua_pushlightuserdata(L, argv); /* 2nd argument */
-  status = lua_pcall(L, 2, 1, 0);  /* do the call */
-  result = lua_toboolean(L, -1);  /* get result */
-  report(L, status);
-  lua_close(L);
-  return (result && status == LUA_OK) ? EXIT_SUCCESS : EXIT_FAILURE;
+  lua_pushcfunction(L, &pmain);  /* to call 'pmain' in protected mode */  // 将主函数地址压入栈中，索引0。在保护模式中调用pmain函数
+  lua_pushinteger(L, argc);  /* 1st argument */       // 将命令行参数个数压入栈中，索引1
+  lua_pushlightuserdata(L, argv); /* 2nd argument */  // 将命令行字符串数组头地址压入栈中，索引2
+  status = lua_pcall(L, 2, 1, 0);  /* do the call */  // 调用栈中的主函数。
+  result = lua_toboolean(L, -1);  /* get result */    // 获得调用结果
+  report(L, status);                                  // 报告调用结果
+  lua_close(L);                                       // 关闭状态机
+  return (result && status == LUA_OK) ? EXIT_SUCCESS : EXIT_FAILURE;  // 返回错误码，0表示没错误，1表示有错误。
+}
+```
+
+独立解释器的主体（在保护模式下调用）。读取并处理所有选项。
+
+```cpp
+/*
+** Main body of stand-alone interpreter (to be called in protected mode).
+** Reads the options and handles them all.
+*/
+static int pmain (lua_State *L) {
+  int argc = (int)lua_tointeger(L, 1);       // 读取命令行数据个数
+  char **argv = (char **)lua_touserdata(L, 2);  
+  int script;
+  int args = collectargs(argv, &script);   // 读取命令行参数
+  luaL_checkversion(L);  /* check that interpreter has correct version */ // 自校验检查Lua解释器的版本
+  if (argv[0] && argv[0][0]) progname = argv[0];   // 读取索引为0第一个的参数，一般为Lua
+  if (args == has_error) {  /* bad arg? */         // 参数是否使用正确
+    print_usage(argv[script]);  /* 'script' has index of bad arg. */  // 参数不正确，打印参数的正确的用法
+    return 0;
+  }
+  if (args & has_v)  /* option '-v'? */  // 是否打印Lua版本
+    print_version();
+  if (args & has_E) {  /* option '-E'? */
+    lua_pushboolean(L, 1);  /* signal for libraries to ignore env. vars. */
+    lua_setfield(L, LUA_REGISTRYINDEX, "LUA_NOENV");
+  }
+  luaL_openlibs(L);  /* open standard libraries */  // Lua打开标准库
+  createargtable(L, argv, argc, script);  /* create table 'arg' */ // 创建参数表
+  lua_gc(L, LUA_GCGEN, 0, 0);  /* GC in generational mode */  // 设置Lua垃圾回收器
+  if (!(args & has_E)) {  /* no option '-E'? */
+    if (handle_luainit(L) != LUA_OK)  /* run LUA_INIT */    // 运行Lua初始化设置，包括读取解释文件等
+      return 0;  /* error running LUA_INIT */
+  }
+  if (!runargs(L, argv, script))  /* execute arguments -e and -l */ // 执行参数-e和-l
+    return 0;  /* something failed */
+  if (script < argc &&  /* execute main script (if there is one) */ // 执行脚本
+      handle_script(L, argv + script) != LUA_OK)
+    return 0;
+  if (args & has_i)  /* -i option? */
+    doREPL(L);  /* do read-eval-print loop */   // 做读评估打印循环
+  else if (script == argc && !(args & (has_e | has_v))) {  /* no arguments? */ // 命令行中只有Lua指令，执行交互模式
+    if (lua_stdin_is_tty()) {  /* running in interactive mode? */  // 是否在交互模式下运行？
+      print_version();
+      doREPL(L);  /* do read-eval-print loop */  // 做读评估打印循环
+    }
+    else dofile(L, NULL);  /* executes stdin as a file */   // 将标准输入执行为文件
+  }
+  lua_pushboolean(L, 1);  /* signal no errors */  // 没有错误。
+  return 1;
 }
 ```
 
