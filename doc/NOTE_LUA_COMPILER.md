@@ -144,23 +144,23 @@ typedef struct global_State {
 */
 struct lua_State {
   CommonHeader;
-  lu_byte status;
-  lu_byte allowhook;
-  unsigned short nci;  /* number of items in 'ci' list */
-  StkId top;  /* first free slot in the stack */
+  lu_byte status;  /* 状态 */
+  lu_byte allowhook;  /* 钩子 */
+  unsigned short nci;  /* number of items in 'ci' list ‘ci’列表中的项目数*/
+  StkId top;  /* first free slot in the stack 堆栈中的第一个空闲插槽 */
   global_State *l_G;
-  CallInfo *ci;  /* call info for current function */
-  const Instruction *oldpc;  /* last pc traced */
-  StkId stack_last;  /* last free slot in the stack */
-  StkId stack;  /* stack base */
-  UpVal *openupval;  /* list of open upvalues in this stack */
-  GCObject *gclist;
-  struct lua_State *twups;  /* list of threads with open upvalues */
-  struct lua_longjmp *errorJmp;  /* current error recover point */
-  CallInfo base_ci;  /* CallInfo for first level (C calling Lua) */
+  CallInfo *ci;  /* call info for current function 当前函数的调用信息*/
+  const Instruction *oldpc;  /* last pc traced 追踪到最后一个PC*/
+  StkId stack_last;  /* last free slot in the stack 堆栈中的最后一个空闲插槽*/
+  StkId stack;  /* stack base 堆栈基础*/
+  UpVal *openupval;  /* list of open upvalues in this stack 此堆栈中未清upvalue的列表*/
+  GCObject *gclist; /* GC对象的链表 */
+  struct lua_State *twups;  /* list of threads with open upvalues 具有开放upvalues的线程列表*/
+  struct lua_longjmp *errorJmp;  /* current error recover point 当前错误恢复点*/
+  CallInfo base_ci;  /* CallInfo for first level (C calling Lua) 一级CallInfo（C调用Lua） */
   volatile lua_Hook hook;
-  ptrdiff_t errfunc;  /* current error handling function (stack index) */
-  l_uint32 nCcalls;  /* number of allowed nested C calls - 'nci' */
+  ptrdiff_t errfunc;  /* current error handling function (stack index) 当前的错误处理函数（堆栈索引） */
+  l_uint32 nCcalls;  /* number of allowed nested C calls - 'nci' 允许的嵌套C调用数-'nci' */
   int stacksize;
   int basehookcount;
   int hookcount;
