@@ -170,6 +170,8 @@ struct lua_State {
 
 ### Lua 主函数调用函数说明
 
+以下为`lua.c`和`lua.h`
+
 包含了**Lua配置文件**和**Lua辅助函数**的大多数功能，定义了Lua的大、小和发布版本号，发布版本数字，发布字符串等。
 
 ```cpp
@@ -837,13 +839,848 @@ static void mainfunc (LexState *ls, FuncState *fs) {
 
 ### Lua 初始化
 
+以下为`linit.c`和`linit.h`
 
+定义了打开所有**Lua 基本库**的函数，比如`io`库，`coroutine`和`utf8`库等。
+
+如果将Lua嵌入程序中并且需要打开标准库，请在程序中调用luaL_openlibs。 如果需要不同的库集，请将此文件复制到项目中并进行编辑以适合的需求。
+
+还可以预加载`preload`库，以便以后的`require`可以打开已经链接到应用程序的库。 为此，请执行以下代码：
+
+```cpp
+luaL_getsubtable（L，LUA_REGISTRYINDEX，LUA_PRELOAD_TABLE）;
+lua_pushcfunction（L，luaopen_modname）;
+lua_setfield（L，-2，modname）;
+lua_pop（L，1）; //删除PRELOAD表x
+```
+
+```cpp
+/*
+** these libs are loaded by lua.c and are readily available to any Lua program
+这些库是由lua.c加载的，并且可以被任何Lua程序使用
+*/
+static const luaL_Reg loadedlibs[] = {
+  {LUA_GNAME, luaopen_base},
+  {LUA_LOADLIBNAME, luaopen_package},
+  {LUA_COLIBNAME, luaopen_coroutine},
+  {LUA_TABLIBNAME, luaopen_table},
+  {LUA_IOLIBNAME, luaopen_io},
+  {LUA_OSLIBNAME, luaopen_os},
+  {LUA_STRLIBNAME, luaopen_string},
+  {LUA_MATHLIBNAME, luaopen_math},
+  {LUA_UTF8LIBNAME, luaopen_utf8},
+  {LUA_DBLIBNAME, luaopen_debug},
+  {NULL, NULL}
+};
+
+
+LUALIB_API void luaL_openlibs (lua_State *L) {
+  const luaL_Reg *lib;
+  /* "require" functions from 'loadedlibs' and set results to global table */
+  for (lib = loadedlibs; lib->func; lib++) {
+    luaL_requiref(L, lib->name, lib->func, 1);
+    lua_pop(L, 1);  /* remove lib */
+  }
+}
+```
 
 ## Lua 配置文件
 
+以下为`luaconf.h`
+
+这里的某些定义可以通过编译器在外部进行更改（例如，使用`-D`选项）。 这些受`#if！defined`防护措施保护。 但是，应在此处直接更改其他几个定义，因为它们会影响Lua ABI（通过在此处进行更改，可以确保连接到Lua的所有软件（例如C库）都将使用相同的配置进行编译）； 或因为它们很少更改。
+
+`LUAI_MAXCSTACK`定义了嵌套调用的最大深度，并且还限制了实现中其他递归算法（例如语法分析）的最大深度。 太大的值可能会使解释器崩溃（C堆栈溢出）。 对于常规计算机，默认值似乎可以，但是对于受限制的硬件，该值可能会太大。 测试文件“ cstack.lua”可能有助于找到一个好的限制。 （它将崩溃，并且限制过高。）
+
 ```cpp
-#define LUA_API		extern
+#if !defined(LUAI_MAXCSTACK)
+#define LUAI_MAXCSTACK		2000
+#endif
 ```
+
+`LUA_USE_C89`控制非ISO-C89功能的使用。 如果希望Lua避免在Windows上使用一些C99功能或Windows特定功能，请定义它。
+
+```cpp
+/* #define LUA_USE_C89 */
+```
+
+Lua的各平台定义
+
+```cpp
+/*
+** By default, Lua on Windows use (some) specific Windows features
+*/
+#if !defined(LUA_USE_C89) && defined(_WIN32) && !defined(_WIN32_WCE)
+#define LUA_USE_WINDOWS  /* enable goodies for regular Windows */
+#endif
+
+
+#if defined(LUA_USE_WINDOWS)
+#define LUA_DL_DLL	/* enable support for DLL */
+#define LUA_USE_C89	/* broadly, Windows is C89 */
+#endif
+
+
+#if defined(LUA_USE_LINUX)
+#define LUA_USE_POSIX
+#define LUA_USE_DLOPEN		/* needs an extra library: -ldl */
+#endif
+
+
+#if defined(LUA_USE_MACOSX)
+#define LUA_USE_POSIX
+#define LUA_USE_DLOPEN		/* MacOS does not need -ldl */
+#endif
+```
+
+Lua基本类型数据定义
+
+```cpp
+/* predefined options for LUA_INT_TYPE */
+#define LUA_INT_INT		1
+#define LUA_INT_LONG		2
+#define LUA_INT_LONGLONG	3
+
+/* predefined options for LUA_FLOAT_TYPE */
+#define LUA_FLOAT_FLOAT		1
+#define LUA_FLOAT_DOUBLE	2
+#define LUA_FLOAT_LONGDOUBLE	3
+
+#if defined(LUA_32BITS)		/* { */
+/*
+** 32-bit integers and 'float'
+*/
+#if LUAI_IS32INT  /* use 'int' if big enough */
+#define LUA_INT_TYPE	LUA_INT_INT
+#else  /* otherwise use 'long' */
+#define LUA_INT_TYPE	LUA_INT_LONG
+#endif
+#define LUA_FLOAT_TYPE	LUA_FLOAT_FLOAT
+
+#elif defined(LUA_C89_NUMBERS)	/* }{ */
+/*
+** largest types available for C89 ('long' and 'double')
+*/
+#define LUA_INT_TYPE	LUA_INT_LONG
+#define LUA_FLOAT_TYPE	LUA_FLOAT_DOUBLE
+
+#endif				/* } */
+
+
+/*
+** default configuration for 64-bit Lua ('long long' and 'double')
+*/
+#if !defined(LUA_INT_TYPE)
+#define LUA_INT_TYPE	LUA_INT_LONGLONG
+#endif
+
+#if !defined(LUA_FLOAT_TYPE)
+#define LUA_FLOAT_TYPE	LUA_FLOAT_DOUBLE
+#endif
+```
+
+Lua路径定义
+
+```cpp
+/*
+** LUA_PATH_SEP is the character that separates templates in a path.
+** LUA_PATH_MARK is the string that marks the substitution points in a
+** template.
+** LUA_EXEC_DIR in a Windows path is replaced by the executable's
+** directory.
+*/
+#define LUA_PATH_SEP            ";"
+#define LUA_PATH_MARK           "?"
+#define LUA_EXEC_DIR            "!"
+
+#define LUA_VDIR	LUA_VERSION_MAJOR "." LUA_VERSION_MINOR
+#if defined(_WIN32)	/* { */
+/*
+** In Windows, any exclamation mark ('!') in the path is replaced by the
+** path of the directory of the executable file of the current process.
+*/
+#define LUA_LDIR	"!\\lua\\"
+#define LUA_CDIR	"!\\"
+#define LUA_SHRDIR	"!\\..\\share\\lua\\" LUA_VDIR "\\"
+
+#if !defined(LUA_PATH_DEFAULT)
+#define LUA_PATH_DEFAULT  \
+		LUA_LDIR"?.lua;"  LUA_LDIR"?\\init.lua;" \
+		LUA_CDIR"?.lua;"  LUA_CDIR"?\\init.lua;" \
+		LUA_SHRDIR"?.lua;" LUA_SHRDIR"?\\init.lua;" \
+		".\\?.lua;" ".\\?\\init.lua"
+#endif
+
+#if !defined(LUA_CPATH_DEFAULT)
+#define LUA_CPATH_DEFAULT \
+		LUA_CDIR"?.dll;" \
+		LUA_CDIR"..\\lib\\lua\\" LUA_VDIR "\\?.dll;" \
+		LUA_CDIR"loadall.dll;" ".\\?.dll"
+#endif
+
+#else			/* }{ */
+
+#define LUA_ROOT	"/usr/local/"
+#define LUA_LDIR	LUA_ROOT "share/lua/" LUA_VDIR "/"
+#define LUA_CDIR	LUA_ROOT "lib/lua/" LUA_VDIR "/"
+
+#if !defined(LUA_PATH_DEFAULT)
+#define LUA_PATH_DEFAULT  \
+		LUA_LDIR"?.lua;"  LUA_LDIR"?/init.lua;" \
+		LUA_CDIR"?.lua;"  LUA_CDIR"?/init.lua;" \
+		"./?.lua;" "./?/init.lua"
+#endif
+
+#if !defined(LUA_CPATH_DEFAULT)
+#define LUA_CPATH_DEFAULT \
+		LUA_CDIR"?.so;" LUA_CDIR"loadall.so;" "./?.so"
+#endif
+
+#endif			/* } */
+
+#if !defined(LUA_DIRSEP)
+
+#if defined(_WIN32)
+#define LUA_DIRSEP	"\\"
+#else
+#define LUA_DIRSEP	"/"
+#endif
+
+#endif
+```
+
+Lua C库导出
+
+```cpp
+#if defined(LUA_BUILD_AS_DLL)	/* { */
+
+#if defined(LUA_CORE) || defined(LUA_LIB)	/* { */
+#define LUA_API __declspec(dllexport)
+#else						/* }{ */
+#define LUA_API __declspec(dllimport)
+#endif						/* } */
+
+#else				/* }{ */
+
+#define LUA_API		extern
+
+#endif				/* } */
+
+
+/*
+** More often than not the libs go together with the core.
+*/
+#define LUALIB_API	LUA_API
+#define LUAMOD_API	LUA_API
+
+#if defined(__GNUC__) && ((__GNUC__*100 + __GNUC_MINOR__) >= 302) && \
+    defined(__ELF__)		/* { */
+#define LUAI_FUNC	__attribute__((visibility("internal"))) extern
+#else				/* }{ */
+#define LUAI_FUNC	extern
+#endif				/* } */
+
+#define LUAI_DDEC(dec)	LUAI_FUNC dec
+#define LUAI_DDEF	/* empty */
+```
+
+Lua类型定义
+
+```cpp
+#define l_mathlim(n)		(DBL_##n)
+
+#define LUAI_UACNUMBER	double
+
+#define LUA_NUMBER_FRMLEN	""
+#define LUA_NUMBER_FMT		"%.14g"
+
+#define l_mathop(op)		op
+
+#define lua_str2number(s,p)	strtod((s), (p))
+
+#if defined(LLONG_MAX)		/* { */
+/* use ISO C99 stuff */
+
+#define LUA_INTEGER		long long
+#define LUA_INTEGER_FRMLEN	"ll"
+
+#define LUA_MAXINTEGER		LLONG_MAX
+#define LUA_MININTEGER		LLONG_MIN
+
+#define LUA_MAXUNSIGNED		ULLONG_MAX
+
+#elif defined(LUA_USE_WINDOWS) /* }{ */
+/* in Windows, can use specific Windows types */
+
+#define LUA_INTEGER		__int64
+#define LUA_INTEGER_FRMLEN	"I64"
+
+#define LUA_MAXINTEGER		_I64_MAX
+#define LUA_MININTEGER		_I64_MIN
+
+#define LUA_MAXUNSIGNED		_UI64_MAX
+
+#else				/* }{ */
+
+#error "Compiler does not support 'long long'. Use option '-DLUA_32BITS' \
+  or '-DLUA_C89_NUMBERS' (see file 'luaconf.h' for details)"
+
+#endif				/* } */
+
+#else				/* }{ */
+
+#error "numeric integer type not defined"
+
+#endif				/* } */
+```
+
+## Lua 词法分析器
+
+以下为`llex.c`和`llex.h`
+
+语义信息，词素，词法分析器和词法分析器接口定义
+
+```cpp
+
+// 256 + 1
+#define FIRST_RESERVED	257
+
+
+#if !defined(LUA_ENV)
+#define LUA_ENV		"_ENV"
+#endif
+
+
+/*
+* WARNING: if you change the order of this enumeration,
+* grep "ORDER RESERVED"  保留关键字
+*/
+enum RESERVED {
+  /* terminal symbols denoted by reserved words */
+  // 保留关键字终结符
+  TK_AND = FIRST_RESERVED, TK_BREAK,
+  TK_DO, TK_ELSE, TK_ELSEIF, TK_END, TK_FALSE, TK_FOR, TK_FUNCTION,
+  TK_GOTO, TK_IF, TK_IN, TK_LOCAL, TK_NIL, TK_NOT, TK_OR, TK_REPEAT,
+  TK_RETURN, TK_THEN, TK_TRUE, TK_UNTIL, TK_WHILE,
+  /* other terminal symbols */
+  // 其他终结符
+  TK_IDIV, TK_CONCAT, TK_DOTS, TK_EQ, TK_GE, TK_LE, TK_NE,
+  TK_SHL, TK_SHR,
+  TK_DBCOLON, TK_EOS,
+  TK_FLT, TK_INT, TK_NAME, TK_STRING
+};
+
+/* number of reserved words */
+#define NUM_RESERVED	(cast_int(TK_WHILE-FIRST_RESERVED + 1))
+
+// 语义信息
+typedef union {
+  lua_Number r;
+  lua_Integer i;
+  TString *ts;
+} SemInfo;  /* semantics information */
+
+/* 标记 */
+typedef struct Token {
+  int token;
+  SemInfo seminfo;
+} Token;
+
+
+/* state of the lexer plus state of the parser when shared by all
+   functions 词法分析状态机*/
+typedef struct LexState {
+  int current;  /* current character (charint) */  // 当前的字符
+  int linenumber;  /* input line counter */        // 当前的行号
+  int lastline;  /* line of last token 'consumed' */ // 最后一个记号的行
+  Token t;  /* current token */                    // 当前记号
+  Token lookahead;  /* look ahead token */         // 下一个记号
+  struct FuncState *fs;  /* current function (parser) */ // 当前函数(语法分析器)
+  struct lua_State *L;                              // lua状态机
+  ZIO *z;  /* input stream */                     // 输入字符/词素流
+  Mbuffer *buff;  /* buffer for tokens */         // 缓冲流
+  Table *h;  /* to avoid collection/reuse strings */  // 符号表
+  struct Dyndata *dyd;  /* dynamic structures used by the parser */
+  TString *source;  /* current source name */
+  TString *envn;  /* environment variable name */  // 环境变量
+} LexState;
+
+
+LUAI_FUNC void luaX_init (lua_State *L);
+LUAI_FUNC void luaX_setinput (lua_State *L, LexState *ls, ZIO *z,
+                              TString *source, int firstchar);
+LUAI_FUNC TString *luaX_newstring (LexState *ls, const char *str, size_t l);
+LUAI_FUNC void luaX_next (LexState *ls);
+LUAI_FUNC int luaX_lookahead (LexState *ls);
+LUAI_FUNC l_noret luaX_syntaxerror (LexState *ls, const char *s);
+LUAI_FUNC const char *luaX_token2str (LexState *ls, int token);
+```
+
+Lua保留关键字
+
+```cpp
+/* ORDER RESERVED */
+// lua保留关键字
+static const char *const luaX_tokens [] = {
+    "and", "break", "do", "else", "elseif",
+    "end", "false", "for", "function", "goto", "if",
+    "in", "local", "nil", "not", "or", "repeat",
+    "return", "then", "true", "until", "while",
+    "//", "..", "...", "==", ">=", "<=", "~=",
+    "<<", ">>", "::", "<eof>",
+    "<number>", "<integer>", "<name>", "<string>"
+};
+```
+
+检查单个字符
+
+```cpp
+/* 检查当前的字符是否是`c` */
+static int check_next1 (LexState *ls, int c) {
+  if (ls->current == c) {
+    next(ls);
+    return 1;
+  }
+  else return 0;
+}
+
+
+/*
+** Check whether current char is in set 'set' (with two chars) and saves it
+检查当前字符是否在集合`set`中（带有两个字符）并保存
+*/
+static int check_next2 (LexState *ls, const char *set) {
+  lua_assert(set[2] == '\0');
+  if (ls->current == set[0] || ls->current == set[1]) {
+    save_and_next(ls);
+    return 1;
+  }
+  else return 0;
+}
+```
+
+判断是否是数字:
+
+```cpp
+/* LUA_NUMBER */
+/*
+** This function is quite liberal in what it accepts, as 'luaO_str2num' will reject ill-formed numerals. Roughly, it accepts the following pattern:
+** 该函数在接受方面相当自由，因为“ luaO_str2num”将拒绝格式错误的数字。 大致来说，它接受以下模式：
+**   %d(%x|%.|([Ee][+-]?))* | 0[Xx](%x|%.|([Pp][+-]?))*
+**
+** The only tricky part is to accept [+-] only after a valid exponent mark, to avoid reading '3-4' or '0xe+1' as a single number.
+唯一棘手的部分是仅在有效指数标记后接受[+-]，以避免将'3-4'或'0xe + 1'读为单个数字。
+**
+** The caller might have already read an initial dot.
+调用者可能已经读取了一个初始点。
+*/
+static int read_numeral (LexState *ls, SemInfo *seminfo) {
+  TValue obj;
+  const char *expo = "Ee";
+  int first = ls->current;
+  lua_assert(lisdigit(ls->current));
+  save_and_next(ls);
+  if (first == '0' && check_next2(ls, "xX"))  /* hexadecimal? 是否是16进制数字*/
+    expo = "Pp";
+  for (;;) {
+    if (check_next2(ls, expo))  /* exponent mark?  指数标记？如果是16进制就置为Pp，不读取指数标记 */
+      check_next2(ls, "-+");  /* optional exponent sign 判断是正指数还是负指数*/
+    else if (lisxdigit(ls->current) || ls->current == '.')  /* '%x|%.' 判断浮点数的组成：数字或者小数点*/
+      save_and_next(ls);
+    else break;
+  }
+  if (lislalpha(ls->current))  /* is numeral touching a letter? 是否数字后紧接是一个字母*/
+    save_and_next(ls);  /* force an error 强制一个错误*/
+  save(ls, '\0'); /* 给其后加一个字符串结束符号 */
+  if (luaO_str2num(luaZ_buffer(ls->buff), &obj) == 0)  /* format error? */
+    lexerror(ls, "malformed number", TK_FLT);
+  if (ttisinteger(&obj)) {
+    seminfo->i = ivalue(&obj);
+    return TK_INT;
+  }
+  else {
+    lua_assert(ttisfloat(&obj));
+    seminfo->r = fltvalue(&obj);
+    return TK_FLT;
+  }
+}
+```
+
+将字符串转换为整数或者浮点数:
+
+```cpp
+size_t luaO_str2num (const char *s, TValue *o) {
+  lua_Integer i; lua_Number n;
+  const char *e;
+  if ((e = l_str2int(s, &i)) != NULL) {  /* try as an integer */
+    setivalue(o, i);
+  }
+  else if ((e = l_str2d(s, &n)) != NULL) {  /* else try as a float */
+    setfltvalue(o, n);
+  }
+  else
+    return 0;  /* conversion failed */
+  return (e - s) + 1;  /* success; return string size */
+}
+
+#define MAXBY10		cast(lua_Unsigned, LUA_MAXINTEGER / 10)
+#define MAXLASTD	cast_int(LUA_MAXINTEGER % 10)
+
+static const char *l_str2int (const char *s, lua_Integer *result) {
+  lua_Unsigned a = 0;
+  int empty = 1;
+  int neg;
+  while (lisspace(cast_uchar(*s))) s++;  /* skip initial spaces */
+  neg = isneg(&s);
+  if (s[0] == '0' &&
+      (s[1] == 'x' || s[1] == 'X')) {  /* hex? */
+    s += 2;  /* skip '0x' */
+    for (; lisxdigit(cast_uchar(*s)); s++) {
+      a = a * 16 + luaO_hexavalue(*s);
+      empty = 0;
+    }
+  }
+  else {  /* decimal */
+    for (; lisdigit(cast_uchar(*s)); s++) {
+      int d = *s - '0';
+      if (a >= MAXBY10 && (a > MAXBY10 || d > MAXLASTD + neg))  /* overflow? */
+        return NULL;  /* do not accept it (as integer) */
+      a = a * 10 + d;
+      empty = 0;
+    }
+  }
+  while (lisspace(cast_uchar(*s))) s++;  /* skip trailing spaces */
+  if (empty || *s != '\0') return NULL;  /* something wrong in the numeral */
+  else {
+    *result = l_castU2S((neg) ? 0u - a : a);
+    return s;
+  }
+}
+
+/*
+** Convert string 's' to a Lua number (put in 'result'). Return NULL
+** on fail or the address of the ending '\0' on success.
+** 'pmode' points to (and 'mode' contains) special things in the string:
+** - 'x'/'X' means a hexadecimal numeral
+** - 'n'/'N' means 'inf' or 'nan' (which should be rejected)
+** - '.' just optimizes the search for the common case (nothing special)
+** This function accepts both the current locale or a dot as the radix
+** mark. If the conversion fails, it may mean number has a dot but
+** locale accepts something else. In that case, the code copies 's'
+** to a buffer (because 's' is read-only), changes the dot to the
+** current locale radix mark, and tries to convert again.
+**将字符串“ s”转换为Lua编号（输入“结果”）。 如果失败，则返回NULL；如果成功，则返回结尾“ \ 0”的地址。 'pmode'指向（并且'mode'包含）字符串中的特殊内容：
+**-'x'/'X'表示十六进制数字
+**-'n'/'N'表示'inf'或'nan'（应拒绝）
+**-'.' 只是针对常见情况优化搜索（没什么特别的）
+此函数接受当前语言环境或点作为基数标记。 如果转换失败，则可能意味着数字带有点，但语言环境接受其他内容。 在这种情况下，代码会将“s”复制到缓冲区（因为“s”是只读的），将点更改为当前的语言环境基数标记，然后尝试再次进行转换。
+*/
+static const char *l_str2d (const char *s, lua_Number *result) {
+  const char *endptr;
+  const char *pmode = strpbrk(s, ".xXnN");
+  int mode = pmode ? ltolower(cast_uchar(*pmode)) : 0;
+  if (mode == 'n')  /* reject 'inf' and 'nan' 不解析inf或者nan */
+    return NULL;
+  endptr = l_str2dloc(s, result, mode);  /* try to convert 尝试转换 */
+  if (endptr == NULL) {  /* failed? may be a different locale 失败了 */
+    char buff[L_MAXLENNUM + 1];
+    const char *pdot = strchr(s, '.');
+    if (strlen(s) > L_MAXLENNUM || pdot == NULL)
+      return NULL;  /* string too long or no dot; fail */
+    strcpy(buff, s);  /* copy string to buffer */
+    buff[pdot - s] = lua_getlocaledecpoint();  /* correct decimal point */
+    endptr = l_str2dloc(buff, result, mode);  /* try again */
+    if (endptr != NULL)
+      endptr = s + (endptr - buff);  /* make relative to 's' */
+  }
+  return endptr;
+}
+```
+
+读取Lua字符串
+
+```cpp
+/* 读取字符串，注意区分转义字符与读取文件的转义字符 */
+static void read_string (LexState *ls, int del, SemInfo *seminfo) {
+  save_and_next(ls);  /* keep delimiter (for error messages) 保留定界符（用于错误消息） */
+  while (ls->current != del) {
+    switch (ls->current) {
+      case EOZ:
+        lexerror(ls, "unfinished string", TK_EOS);
+        break;  /* to avoid warnings */
+      case '\n':
+      case '\r':
+        lexerror(ls, "unfinished string", TK_STRING);
+        break;  /* to avoid warnings */
+      case '\\': {  /* escape sequences 转义字符  */
+        int c;  /* final character to be saved */
+        save_and_next(ls);  /* keep '\\' for error messages */
+        switch (ls->current) {
+          case 'a': c = '\a'; goto read_save;
+          case 'b': c = '\b'; goto read_save;
+          case 'f': c = '\f'; goto read_save;
+          case 'n': c = '\n'; goto read_save;
+          case 'r': c = '\r'; goto read_save;
+          case 't': c = '\t'; goto read_save;
+          case 'v': c = '\v'; goto read_save;
+          case 'x': c = readhexaesc(ls); goto read_save;
+          case 'u': utf8esc(ls);  goto no_save;
+          case '\n': case '\r':
+            inclinenumber(ls); c = '\n'; goto only_save;
+          case '\\': case '\"': case '\'':
+            c = ls->current; goto read_save;
+          case EOZ: goto no_save;  /* will raise an error next loop */
+          case 'z': {  /* zap following span of spaces */
+            luaZ_buffremove(ls->buff, 1);  /* remove '\\' */
+            next(ls);  /* skip the 'z' */
+            while (lisspace(ls->current)) {
+              if (currIsNewline(ls)) inclinenumber(ls);
+              else next(ls);
+            }
+            goto no_save;
+          }
+          default: {
+            esccheck(ls, lisdigit(ls->current), "invalid escape sequence");
+            c = readdecesc(ls);  /* digital escape '\ddd' */
+            goto only_save;
+          }
+        }
+       read_save:
+         next(ls);
+         /* go through 穿过去继续执行 */
+       only_save:
+         luaZ_buffremove(ls->buff, 1);  /* remove '\\' */
+         save(ls, c);
+         /* go through */
+       no_save: break;
+      }
+      default:
+        save_and_next(ls);
+    }
+  }
+  save_and_next(ls);  /* skip delimiter */
+  seminfo->ts = luaX_newstring(ls, luaZ_buffer(ls->buff) + 1,
+                                   luaZ_bufflen(ls->buff) - 2);
+}
+```
+
+忽略注释
+
+```cpp
+/*
+** reads a sequence '[=*[' or ']=*]', leaving the last bracket.
+** If sequence is well formed, return its number of '='s + 2; otherwise,
+** return 1 if there is no '='s or 0 otherwise (an unfinished '[==...').
+** reads a sequence '[=*[' or ']=*]', leaving the last bracket.
+** If sequence is well formed, return its number of '='s + 2; otherwise,
+** return 1 if there is no '='s or 0 otherwise (an unfinished '[==...').
+忽略注释
+*/
+static size_t skip_sep (LexState *ls) {
+  size_t count = 0;
+  int s = ls->current;
+  lua_assert(s == '[' || s == ']');
+  save_and_next(ls);
+  while (ls->current == '=') {
+    save_and_next(ls);
+    count++;
+  }
+  return (ls->current == s) ? count + 2
+         : (count == 0) ? 1
+         : 0;
+}
+```
+
+读取跨行注释Lua长字符串
+
+```cpp
+/* 读取Lua跨行注释长字符串，Lua特有的 */
+static void read_long_string (LexState *ls, SemInfo *seminfo, size_t sep) {
+  int line = ls->linenumber;  /* initial line (for error message) */
+  save_and_next(ls);  /* skip 2nd '['  */
+  if (currIsNewline(ls))  /* string starts with a newline? */
+    inclinenumber(ls);  /* skip it */
+  for (;;) {
+    switch (ls->current) {
+      case EOZ: {  /* error */
+        const char *what = (seminfo ? "string" : "comment");
+        const char *msg = luaO_pushfstring(ls->L,
+                     "unfinished long %s (starting at line %d)", what, line);
+        lexerror(ls, msg, TK_EOS);
+        break;  /* to avoid warnings */
+      }
+      case ']': {
+        if (skip_sep(ls) == sep) {
+          save_and_next(ls);  /* skip 2nd ']' */
+          goto endloop;
+        }
+        break;
+      }
+      case '\n': case '\r': {
+        save(ls, '\n');
+        inclinenumber(ls);
+        if (!seminfo) luaZ_resetbuffer(ls->buff);  /* avoid wasting space */
+        break;
+      }
+      default: {
+        if (seminfo) save_and_next(ls);
+        else next(ls);
+      }
+    }
+  } endloop:
+  if (seminfo)
+    seminfo->ts = luaX_newstring(ls, luaZ_buffer(ls->buff) + sep,
+                                     luaZ_bufflen(ls->buff) - 2 * sep);
+}
+```
+
+词法分析器函数:主要是读取各种token，重点是注释，关键字，数字，字符串，标识符。
+
+```cpp
+/* 词法分析器主函数 */
+static int llex (LexState *ls, SemInfo *seminfo) {
+  luaZ_resetbuffer(ls->buff);
+  for (;;) {
+    switch (ls->current) {
+      case '\n': case '\r': {  /* line breaks 换行符 */
+        inclinenumber(ls);  /* 增加行号 */
+        break;
+      }
+      case ' ': case '\f': case '\t': case '\v': {  /* spaces 空白字符 */
+        next(ls);
+        break;
+      }
+      case '-': {  /* '-' or '--' (comment)  -- 是Lua注释 */
+        next(ls);
+        if (ls->current != '-') return '-';
+        /* else is a comment */
+        next(ls);
+        if (ls->current == '[') {  /* long comment? 是否是长注释 */
+          size_t sep = skip_sep(ls);
+          luaZ_resetbuffer(ls->buff);  /* 'skip_sep' may dirty the buffer */
+          if (sep >= 2) {
+            read_long_string(ls, NULL, sep);  /* skip long comment  读取跨行长字符串 */
+            luaZ_resetbuffer(ls->buff);  /* previous call may dirty the buff.  忽略掉注释的长字符串 */
+            break;
+          }
+        }
+        /* else short comment 如果是不跨行的短注释 */
+        while (!currIsNewline(ls) && ls->current != EOZ)
+          next(ls);  /* skip until end of line (or end of file) 那就一直读到行尾为止 */ 
+        break;
+      }
+      case '[': {  /* long string or simply '[' 长字符串或者索引中括号 */
+        size_t sep = skip_sep(ls);
+        if (sep >= 2) {
+          read_long_string(ls, seminfo, sep);
+          return TK_STRING;
+        }
+        else if (sep == 0)  /* '[=...' missing second bracket? */
+          lexerror(ls, "invalid long string delimiter", TK_STRING);
+        return '[';
+      }
+      case '=': { /* 判断是一个=的赋值号还是两个=的是否相等符号 */
+        next(ls);
+        if (check_next1(ls, '=')) return TK_EQ;
+        else return '=';
+      }
+      case '<': { /* `<` `<=` `<<` */
+        next(ls);
+        if (check_next1(ls, '=')) return TK_LE;
+        else if (check_next1(ls, '<')) return TK_SHL;
+        else return '<';
+      }
+      case '>': { /* `>` `>=`  `>>` */
+        next(ls);
+        if (check_next1(ls, '=')) return TK_GE;
+        else if (check_next1(ls, '>')) return TK_SHR;
+        else return '>';
+      }
+      case '/': {  /* `/` `//` */
+        next(ls);
+        if (check_next1(ls, '/')) return TK_IDIV;
+        else return '/';
+      }
+      case '~': {  /* `~` `~=` */
+        next(ls);
+        if (check_next1(ls, '=')) return TK_NE;
+        else return '~';
+      }
+      case ':': {  /* `:` `::` */
+        next(ls);
+        if (check_next1(ls, ':')) return TK_DBCOLON;
+        else return ':';
+      }
+      case '"': case '\'': {  /* short literal strings 短字符串 */ 
+        read_string(ls, ls->current, seminfo);
+        return TK_STRING;
+      }
+      case '.': {  /* '.', '..', '...', or number  三个符号或者数字，浮点数字也可以以`.`开头 */
+        save_and_next(ls);
+        if (check_next1(ls, '.')) {
+          if (check_next1(ls, '.'))
+            return TK_DOTS;   /* '...' */
+          else return TK_CONCAT;   /* '..' */
+        }
+        else if (!lisdigit(ls->current)) return '.';
+        else return read_numeral(ls, seminfo);
+      }
+      case '0': case '1': case '2': case '3': case '4':
+      case '5': case '6': case '7': case '8': case '9': {
+        return read_numeral(ls, seminfo);  /* 读取数字 */
+      }
+      case EOZ: {
+        return TK_EOS;
+      }
+      default: {
+        if (lislalpha(ls->current)) {  /* identifier or reserved word? 标识符或者保留字 */
+          TString *ts;
+          do {
+            save_and_next(ls);
+          } while (lislalnum(ls->current));
+          ts = luaX_newstring(ls, luaZ_buffer(ls->buff),
+                                  luaZ_bufflen(ls->buff));
+          seminfo->ts = ts;
+          if (isreserved(ts))  /* reserved word?  是否是保留字 */
+            return ts->extra - 1 + FIRST_RESERVED; /* 返回保留字的类型，其中还包括了诸如and和or之类的逻辑运算符 */
+          else {
+            return TK_NAME;
+          }
+        }
+        else {  /* single-char tokens (+ - / ...)  单个字符的词素，主要是加法，减法，取负号，按位逻辑运算符等 */
+          int c = ls->current;
+          next(ls);
+          return c;
+        }
+      }
+    }
+  }
+}
+
+/* 更新当前的token标记 */
+void luaX_next (LexState *ls) {
+  ls->lastline = ls->linenumber;
+  if (ls->lookahead.token != TK_EOS) {  /* is there a look-ahead token? */
+    ls->t = ls->lookahead;  /* use this one */
+    ls->lookahead.token = TK_EOS;  /* and discharge it */
+  }
+  else
+    ls->t.token = llex(ls, &ls->t.seminfo);  /* read next token */
+}
+
+/* 向前看一个标记 */
+int luaX_lookahead (LexState *ls) {
+  lua_assert(ls->lookahead.token == TK_EOS);
+  ls->lookahead.token = llex(ls, &ls->lookahead.seminfo);
+  return ls->lookahead.token;
+}
+```
+
+## Lua 语法分析器
+
+表达式和变量描述符。
+
+可以延迟变量和表达式的代码生成，以允许优化； “ expdesc”结构描述了可能延迟的变量/表达式。 它具有其“主要”值的说明以及也可以产生其值的条件跳转列表（生成的由短路运算符“和” /“或”表示。
 
 ## Lua 预编译
 
@@ -851,21 +1688,83 @@ static void mainfunc (LexState *ls, FuncState *fs) {
 
 ## Lua 缓冲流
 
+以下为`lzio.c`和`lzio.h`
+
 ## Lua 内存管理
 
 ## Lua 对象
 
+以下为`lobject.c`和`lobject.h`
+
 ## Lua Table (hash)
+
+以下为`ltable.c`和`ltable.h`
 
 ## Lua 字符串和模式匹配
 
+以下为`lstring.c`和`lstring.h`
+
 ## Lua API
+
+以下为`lapi.c`和`lapi.h`
+
+对Lua线程状态`lua_State`的操作API，将不同的Lua类型压入栈，从栈中弹出不同的类型
+
+## 建立Lua库的辅助功能
+
+以下为`lauxlib.c`和`lauxlib.h`
+
+在`lua_State`中找出索引等操作API，与**Lua API**类似。
 
 ## Lua 限制 (Limit)
 
-## Lua 词法分析器
+限制，基本类型和其他一些“与安装有关的”定义
 
-## Lua 语法分析器
+```cpp
+/* maximum value for size_t */
+#define MAX_SIZET	((size_t)(~(size_t)0))
+/* maximum size visible for Lua (must be representable in a lua_Integer) */
+#define MAX_SIZE	(sizeof(size_t) < sizeof(lua_Integer) ? MAX_SIZET \
+                          : (size_t)(LUA_MAXINTEGER))
+#define MAX_LUMEM	((lu_mem)(~(lu_mem)0))
+#define MAX_LMEM	((l_mem)(MAX_LUMEM >> 1))
+#define MAX_INT		INT_MAX  /* maximum value of an int */
+```
+
+类型转换
+
+```cpp
+/* type casts (a macro highlights casts in the code) */
+#define cast(t, exp)	((t)(exp))
+
+#define cast_void(i)	cast(void, (i))
+#define cast_voidp(i)	cast(void *, (i))
+#define cast_num(i)	cast(lua_Number, (i))
+#define cast_int(i)	cast(int, (i))
+#define cast_uint(i)	cast(unsigned int, (i))
+#define cast_byte(i)	cast(lu_byte, (i))
+#define cast_uchar(i)	cast(unsigned char, (i))
+#define cast_char(i)	cast(char, (i))
+#define cast_charp(i)	cast(char *, (i))
+#define cast_sizet(i)	cast(size_t, (i))
+```
+
+运算操作
+
+```cpp
+#if !defined(luai_numadd)
+#define luai_numadd(L,a,b)      ((a)+(b))
+#define luai_numsub(L,a,b)      ((a)-(b))
+#define luai_nummul(L,a,b)      ((a)*(b))
+#define luai_numunm(L,a)        (-(a))
+#define luai_numeq(a,b)         ((a)==(b))
+#define luai_numlt(a,b)         ((a)<(b))
+#define luai_numle(a,b)         ((a)<=(b))
+#define luai_numgt(a,b)         ((a)>(b))
+#define luai_numge(a,b)         ((a)>=(b))
+#define luai_numisnan(a)        (!luai_numeq((a), (a)))
+#endif
+```
 
 ## Lua 垃圾回收 (GC)
 
@@ -902,11 +1801,13 @@ union GCUnion {
 
 ## Lua 函数库
 
-### 建立Lua库的辅助功能
-
-### Lua 基础库
+### Lua 基本函数
 
 ### Lua 时间库
+
+### Lua string库
+
+### Lua table库
 
 ### Lua 数学库
 
@@ -916,9 +1817,9 @@ union GCUnion {
 
 ### 标准I/O（和系统）库
 
-## Lua 代码生成器
+### Lua utf8库
 
-## Lua utf8库
+## Lua 代码生成器
 
 ## Lua 标记方法
 
