@@ -1682,11 +1682,78 @@ int luaX_lookahead (LexState *ls) {
 
 表达式和变量描述符。
 
-可以延迟变量和表达式的代码生成，以允许优化； “ expdesc”结构描述了可能延迟的变量/表达式。 它具有其“主要”值的说明以及也可以产生其值的条件跳转列表（生成的由短路运算符“和” /“或”表示。
+可以延迟变量和表达式的代码生成，以允许优化；`expdesc`结构描述了可能延迟的变量/表达式。它具有其“主要”值的说明以及也可以产生其值的条件跳转列表（生成的由短路运算符`and`/`or`表示。
 
 ## Lua 预编译
 
 以下为`lundump.c`和`lundump.h`
+
+```cpp
+typedef struct {
+  lua_State *L;
+  lua_Writer writer;
+  void *data;
+  int strip;
+  int status;
+} DumpState;
+```
+
+```cpp
+/*
+** dump Lua function as precompiled chunk
+*/
+int luaU_dump(lua_State *L, const Proto *f, lua_Writer w, void *data,
+              int strip) {
+  DumpState D;
+  D.L = L;
+  D.writer = w;
+  D.data = data;
+  D.strip = strip;
+  D.status = 0;
+  DumpHeader(&D);
+  DumpByte(f->sizeupvalues, &D);
+  DumpFunction(f, NULL, &D);
+  return D.status;
+}
+```
+
+```cpp
+/*
+** All high-level dumps go through DumpVector; you can change it to change the endianness of the result
+所有高级转储都通过DumpVector进行；可以更改它以更改结果的字节序
+*/
+#define DumpVector(v,n,D)	DumpBlock(v,(n)*sizeof((v)[0]),D)
+
+#define DumpLiteral(s,D)	DumpBlock(s, sizeof(s) - sizeof(char), D)
+
+static void DumpBlock (const void *b, size_t size, DumpState *D) {
+  if (D->status == 0 && size > 0) {
+    lua_unlock(D->L);
+    D->status = (*D->writer)(D->L, b, size, D->data);
+    lua_lock(D->L);
+  }
+}
+```
+
+```cpp
+/*
+** dump Lua function as precompiled chunk
+将Lua函数转储为预编译块
+*/
+int luaU_dump(lua_State *L, const Proto *f, lua_Writer w, void *data,
+              int strip) {
+  DumpState D;
+  D.L = L;
+  D.writer = w;
+  D.data = data;
+  D.strip = strip;
+  D.status = 0;
+  DumpHeader(&D);
+  DumpByte(f->sizeupvalues, &D);
+  DumpFunction(f, NULL, &D);
+  return D.status;
+}
+```
 
 ### 保存预编译的Lua块
 
