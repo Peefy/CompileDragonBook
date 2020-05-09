@@ -1534,7 +1534,7 @@ static void read_long_string (LexState *ls, SemInfo *seminfo, size_t sep) {
 }
 ```
 
-词法分析器函数:主要是读取各种token，重点是注释，关键字，数字，字符串，标识符。
+词法分析器函数:主要是读取各种token，重点是注释，关键字，数字，字符串，标识符。praser最终结果通常是一个抽象语法树 AST,编译为计算机可以运行或者虚拟机可以运行的代码
 
 ```cpp
 /* 词法分析器主函数 */
@@ -1678,11 +1678,15 @@ int luaX_lookahead (LexState *ls) {
 
 ## Lua 语法分析器
 
+以下为`lparse.c`和`llex.h`
+
 表达式和变量描述符。
 
 可以延迟变量和表达式的代码生成，以允许优化； “ expdesc”结构描述了可能延迟的变量/表达式。 它具有其“主要”值的说明以及也可以产生其值的条件跳转列表（生成的由短路运算符“和” /“或”表示。
 
 ## Lua 预编译
+
+以下为`lundump.c`和`lundump.h`
 
 ### 保存预编译的Lua块
 
@@ -1690,7 +1694,81 @@ int luaX_lookahead (LexState *ls) {
 
 以下为`lzio.c`和`lzio.h`
 
+缓冲数组的定义(可用于词法分析器的临时数据存放位置)
+
+```cpp
+typedef struct Mbuffer {
+  char *buffer;    /* buffer数组定义 */
+  size_t n;        /* 占用空间 */
+  size_t buffsize; /* 总空间 */
+} Mbuffer;
+
+#define luaZ_initbuffer(L, buff) ((buff)->buffer = NULL, (buff)->buffsize = 0)
+#define luaZ_buffer(buff)	((buff)->buffer)
+#define luaZ_sizebuffer(buff)	((buff)->buffsize)
+#define luaZ_bufflen(buff)	((buff)->n)
+#define luaZ_buffremove(buff,i)	((buff)->n -= (i))
+#define luaZ_resetbuffer(buff) ((buff)->n = 0)
+#define luaZ_resizebuffer(L, buff, size) \
+	((buff)->buffer = luaM_reallocvchar(L, (buff)->buffer, \
+				(buff)->buffsize, size), \
+	(buff)->buffsize = size)
+#define luaZ_freebuffer(L, buff)	luaZ_resizebuffer(L, buff, 0)
+```
+
+缓冲流定义:
+
+```cpp
+int luaZ_fill (ZIO *z) {
+  size_t size;
+  lua_State *L = z->L;
+  const char *buff;
+  lua_unlock(L);
+  buff = z->reader(L, z->data, &size);
+  lua_lock(L);
+  if (buff == NULL || size == 0)
+    return EOZ;
+  z->n = size - 1;  /* discount char being returned */
+  z->p = buff;
+  return cast_uchar(*(z->p++));
+}
+
+
+void luaZ_init (lua_State *L, ZIO *z, lua_Reader reader, void *data) {
+  z->L = L;
+  z->reader = reader;
+  z->data = data;
+  z->n = 0;
+  z->p = NULL;
+}
+
+
+/* --------------------------------------------------------------- read --- */
+size_t luaZ_read (ZIO *z, void *b, size_t n) {
+  while (n) {
+    size_t m;
+    if (z->n == 0) {  /* no bytes in buffer? */
+      if (luaZ_fill(z) == EOZ)  /* try to read more */
+        return n;  /* no more input; return number of missing bytes */
+      else {
+        z->n++;  /* luaZ_fill consumed first byte; put it back */
+        z->p--;
+      }
+    }
+    m = (n <= z->n) ? n : z->n;  /* min. between n and z->n */
+    memcpy(b, z->p, m);
+    z->n -= m;
+    z->p += m;
+    b = (char *)b + m;
+    n -= m;
+  }
+  return 0;
+}
+```
+
 ## Lua 内存管理
+
+以下为`lmem.c`和`lmem.h`
 
 ## Lua 对象
 
@@ -1717,6 +1795,8 @@ int luaX_lookahead (LexState *ls) {
 在`lua_State`中找出索引等操作API，与**Lua API**类似。
 
 ## Lua 限制 (Limit)
+
+以下为`llimit.c`和`llimit.h`
 
 限制，基本类型和其他一些“与安装有关的”定义
 
@@ -1768,6 +1848,8 @@ int luaX_lookahead (LexState *ls) {
 
 ## Lua 垃圾回收 (GC)
 
+以下为`lgc.c`和`lgc.h`
+
 ```cpp
 /*
 ** Union of all collectable objects (only for conversions)
@@ -1787,42 +1869,163 @@ union GCUnion {
 
 ## Lua 虚拟机
 
+以下为`lvm.c`和`lvm.h`
+
 ### Lua 堆栈和调用结构
+
+以下为`ldo.c`和`ldo.h`
 
 ### Lua 虚拟机的操作码
 
+以下为`lopnames.h`,`lopcodes.c`和`lopcodes.h`
+
+```cpp
+static const char *const opnames[] = {
+  "MOVE",
+  "LOADI",
+  "LOADF",
+  "LOADK",
+  "LOADKX",
+  "LOADBOOL",
+  "LOADNIL",
+  "GETUPVAL",
+  "SETUPVAL",
+  "GETTABUP",
+  "GETTABLE",
+  "GETI",
+  "GETFIELD",
+  "SETTABUP",
+  "SETTABLE",
+  "SETI",
+  "SETFIELD",
+  "NEWTABLE",
+  "SELF",
+  "ADDI",
+  "ADDK",
+  "SUBK",
+  "MULK",
+  "MODK",
+  "POWK",
+  "DIVK",
+  "IDIVK",
+  "BANDK",
+  "BORK",
+  "BXORK",
+  "SHRI",
+  "SHLI",
+  "ADD",
+  "SUB",
+  "MUL",
+  "MOD",
+  "POW",
+  "DIV",
+  "IDIV",
+  "BAND",
+  "BOR",
+  "BXOR",
+  "SHL",
+  "SHR",
+  "MMBIN",
+  "MMBINI",
+  "MMBINK",
+  "UNM",
+  "BNOT",
+  "NOT",
+  "LEN",
+  "CONCAT",
+  "CLOSE",
+  "TBC",
+  "JMP",
+  "EQ",
+  "LT",
+  "LE",
+  "EQK",
+  "EQI",
+  "LTI",
+  "LEI",
+  "GTI",
+  "GEI",
+  "TEST",
+  "TESTSET",
+  "CALL",
+  "TAILCALL",
+  "RETURN",
+  "RETURN0",
+  "RETURN1",
+  "FORLOOP",
+  "FORPREP",
+  "TFORPREP",
+  "TFORCALL",
+  "TFORLOOP",
+  "SETLIST",
+  "CLOSURE",
+  "VARARG",
+  "VARARGPREP",
+  "EXTRAARG",
+  NULL
+};
+```
+
 ## Lua 原型 (prototypes) 和闭包 (closures)
+
+以下为`lfunc.c`和`lfunc.h`
 
 ## Lua 字符串
 
-### Lua 模式匹配
-
-## Lua 文件IO
+以下为`lstrlib.c`和`lstring.h`
 
 ## Lua 函数库
 
-### Lua 基本函数
+### Lua 基本函数和基础库
+
+以下为`lbaselib`和`lualib.h`
 
 ### Lua 时间库
 
+以下为`ltm.c`和`ltm.h`
+
 ### Lua string库
+
+以下为`lstring.c`,
 
 ### Lua table库
 
+以下为`ltable.c`和`ltable.h`
+
 ### Lua 数学库
+
+以下为`lmathlib.c`
 
 ### Lua 协程库
 
+以下为`lcorolib.c`和`lcorolib.h`
+
 #### Lua 线程 
 
-### 标准I/O（和系统）库
+### 操作系统库
+
+以下为`loslib.c`
+
+### 标准输入输出I/O库
+
+以下为`liolib.c`
 
 ### Lua utf8库
 
+以下为`lutf8lib.c`
+
 ## Lua 代码生成器
 
-## Lua 标记方法
+以下为`lcode.c`和`lcode.h`
+
+## Lua C类型函数
+
+以下为`lctype.c`和`lctype.h`
 
 ## Lua 动态库加载器
 
+以下为`loadlib.c`
+
 ## Lua 调试 (Debug)
+
+以下为`ldblib.c`, `ldebug.c`和`ldebug.h`
