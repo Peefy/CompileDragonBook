@@ -1,6 +1,6 @@
 
 
-## DuGu OPA Policy
+## DuGu Policy (策略)
 
 [-opa，一个统一policy的方案，自带了json like dsl和controller](https://github.com/open-policy-agent/opa) 
 
@@ -8,7 +8,7 @@
 
 [统一controller的部分，一个基于k8s的operator](https://github.com/open-policy-agent/gatekeeper)
 
-[python interpreter的官方实现](https://github.com/python/cpython)
+[Python解释器的官方实现](https://github.com/python/cpython)
 
 [一个社区的go实现的python解释器](https://github.com/go-python/gpython)  
 
