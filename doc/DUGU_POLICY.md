@@ -1,6 +1,6 @@
 
 
-## DuGu OPA
+## DuGu OPA Policy
 
 [-opa，一个统一policy的方案，自带了json like dsl和controller](https://github.com/open-policy-agent/opa) 
 
@@ -88,6 +88,4 @@ opa run data.json
 2. 使用python解释器自带的AST抽象语法树包完成**词法**和**语法**翻译等，生成如等json结构的抽象语法树，完成python DSL->中间语言的功能。
 3. 调用生成器将生成的中间语言翻译成如go语言相关的词法语法和包调用，并生成命令行程序供其他程序调用或者直接嵌入到docker或者k8s容器中，由容器的go解释器完成对生成的命令行应用运行
 
-## CPython如何通过反射机制来扩展语言
 
-### CPython装饰器实现原理
