@@ -1837,6 +1837,155 @@ size_t luaZ_read (ZIO *z, void *b, size_t n) {
 
 以下为`lmem.c`和`lmem.h`
 
+```cpp
+/*
+** {==================================================================
+** Functions to allocate/deallocate arrays for the Parser
+为解析器分配/取消分配数组的函数
+** ===================================================================
+*/
+
+/*
+** Minimum size for arrays during parsing, to avoid overhead of reallocating to size 1, then 2, and then 4. All these arrays will be reallocated to exact sizes or erased when parsing ends.
+解析过程中数组的最小大小，以避免重新分配为大小1，然后为2，然后为4的开销。所有这些数组将在解析结束时重新分配为确切的大小，或者将其擦除。
+*/
+#define MINSIZEARRAY	4
+
+
+void *luaM_growaux_ (lua_State *L, void *block, int nelems, int *psize,
+                     int size_elems, int limit, const char *what) {
+  void *newblock;
+  int size = *psize;
+  if (nelems + 1 <= size)  /* does one extra element still fit? */
+    return block;  /* nothing to be done */
+  if (size >= limit / 2) {  /* cannot double it? */
+    if (unlikely(size >= limit))  /* cannot grow even a little? */
+      luaG_runerror(L, "too many %s (limit is %d)", what, limit);
+    size = limit;  /* still have at least one free place */
+  }
+  else {
+    size *= 2;
+    if (size < MINSIZEARRAY)
+      size = MINSIZEARRAY;  /* minimum size */
+  }
+  lua_assert(nelems + 1 <= size && size <= limit);
+  /* 'limit' ensures that multiplication will not overflow */
+  newblock = luaM_saferealloc_(L, block, cast_sizet(*psize) * size_elems,
+                                         cast_sizet(size) * size_elems);
+  *psize = size;  /* update only when everything else is OK */
+  return newblock;
+}
+
+
+/*
+** In prototypes, the size of the array is also its number of
+** elements (to save memory). So, if it cannot shrink an array
+** to its number of elements, the only option is to raise an
+** error.
+在原型中，数组的大小也是元素的数量（以节省内存）。 因此，如果无法将数组缩小到其元素数量，则唯一的选择就是引发错误。
+*/
+void *luaM_shrinkvector_ (lua_State *L, void *block, int *size,
+                          int final_n, int size_elem) {
+  void *newblock;
+  size_t oldsize = cast_sizet((*size) * size_elem);
+  size_t newsize = cast_sizet(final_n * size_elem);
+  lua_assert(newsize <= oldsize);
+  newblock = luaM_saferealloc_(L, block, oldsize, newsize);
+  *size = final_n;
+  return newblock;
+}
+
+/* }================================================================== */
+
+
+l_noret luaM_toobig (lua_State *L) {
+  luaG_runerror(L, "memory allocation error: block too big");
+}
+
+
+/*
+** Free memory
+释放内存
+*/
+void luaM_free_ (lua_State *L, void *block, size_t osize) {
+  global_State *g = G(L);
+  lua_assert((osize == 0) == (block == NULL));
+  (*g->frealloc)(g->ud, block, osize, 0);
+  g->GCdebt -= osize;
+}
+
+
+/*
+** In case of allocation fail, this function will call the GC to try
+** to free some memory and then try the allocation again.
+** (It should not be called when shrinking a block, because then the
+** interpreter may be in the middle of a collection step.)
+**万一分配失败，此函数将调用GC尝试释放一些内存，然后再次尝试分配。
+**（在缩小块时不应调用它，因为这样，解释器可能处于收集步骤的中间。）
+*/
+static void *tryagain (lua_State *L, void *block,
+                       size_t osize, size_t nsize) {
+  global_State *g = G(L);
+  if (ttisnil(&g->nilvalue)) {  /* is state fully build? */
+    luaC_fullgc(L, 1);  /* try to free some memory... */
+    return (*g->frealloc)(g->ud, block, osize, nsize);  /* try again */
+  }
+  else return NULL;  /* cannot free any memory without a full state */
+}
+
+
+/*
+** Generic allocation routine.
+** If allocation fails while shrinking a block, do not try again; the
+** GC shrinks some blocks and it is not reentrant.
+**通用分配例程。
+**如果在缩小块时分配失败，请不要重试； 的
+** GC缩小了一些块，并且它不是可重入的。
+*/
+void *luaM_realloc_ (lua_State *L, void *block, size_t osize, size_t nsize) {
+  void *newblock;
+  global_State *g = G(L);
+  lua_assert((osize == 0) == (block == NULL));
+  newblock = firsttry(g, block, osize, nsize);
+  if (unlikely(newblock == NULL && nsize > 0)) {
+    if (nsize > osize)  /* not shrinking a block? */
+      newblock = tryagain(L, block, osize, nsize);
+    if (newblock == NULL)  /* still no memory? */
+      return NULL;  /* do not update 'GCdebt' */
+  }
+  lua_assert((nsize == 0) == (newblock == NULL));
+  g->GCdebt = (g->GCdebt + nsize) - osize;
+  return newblock;
+}
+
+
+void *luaM_saferealloc_ (lua_State *L, void *block, size_t osize,
+                                                    size_t nsize) {
+  void *newblock = luaM_realloc_(L, block, osize, nsize);
+  if (unlikely(newblock == NULL && nsize > 0))  /* allocation failed? */
+    luaM_error(L);
+  return newblock;
+}
+
+/* 分配内存 */
+void *luaM_malloc_ (lua_State *L, size_t size, int tag) {
+  if (size == 0)
+    return NULL;  /* that's all */
+  else {
+    global_State *g = G(L);
+    void *newblock = firsttry(g, NULL, tag, size);
+    if (unlikely(newblock == NULL)) {
+      newblock = tryagain(L, NULL, tag, size);
+      if (newblock == NULL)
+        luaM_error(L);
+    }
+    g->GCdebt += size;
+    return newblock;
+  }
+}
+
+```
+
 ## Lua 对象
 
 以下为`lobject.c`和`lobject.h`
