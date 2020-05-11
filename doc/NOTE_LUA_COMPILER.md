@@ -1990,6 +1990,456 @@ void *luaM_malloc_ (lua_State *L, size_t size, int tag) {
 
 以下为`lobject.c`和`lobject.h`
 
+```cpp
+/*
+** Union of all Lua values
+所有Lua值的并集
+*/
+typedef union Value {
+  struct GCObject *gc;    /* collectable objects 可回收对象 */
+  void *p;         /* light userdata 轻量用户数据 */
+  int b;           /* booleans 布尔值 */
+  lua_CFunction f; /* light C functions  轻量C函数 */
+  lua_Integer i;   /* integer numbers  整数 */
+  lua_Number n;    /* float numbers 浮点数 */
+} Value;
+```
+
+```cpp
+/*
+** Tagged Values. This is the basic representation of values in Lua: an actual value plus a tag with its type.
+标记的值。 这是Lua中值的基本表示形式：实际值加上带有其类型的标记。
+*/
+#define TValuefields	Value value_; lu_byte tt_
+
+typedef struct TValue {
+  TValuefields;
+} TValue;
+```
+
+```cpp
+/*
+** Entries in the Lua stack Lua堆栈中的条目
+*/
+typedef union StackValue {
+  TValue val;
+} StackValue;
+
+
+/* index to stack elements 堆栈元素的索引 */
+typedef StackValue *StkId;
+
+/* convert a 'StackValue' to a 'T
+```
+
+Lua可回收对象定义
+
+```cpp
+/*
+** Common Header for all collectable objects (in macro form, to beincluded in other objects)
+所有可收集对象的公共标头（以宏形式包含在其他对象中）
+*/
+#define CommonHeader	struct GCObject *next; lu_byte tt; lu_byte marked
+
+
+/* Common type for all collectable objects 所有可收集对象的通用类型 */
+typedef struct GCObject {
+  CommonHeader;
+} GCObject;
+```
+
+Lua字符串定义
+
+```cpp
+typedef struct TString {
+  CommonHeader;
+  lu_byte extra;  /* reserved words for short strings; "has hash" for longs 短字符串的保留字； 长期“散列” */
+  lu_byte shrlen;  /* length for short strings 短字符串的长度 */
+  unsigned int hash; /* 字符串哈希值 */
+  union {
+    size_t lnglen;  /* length for long strings 长字符串的长度 */
+    struct TString *hnext;  /* linked list for hash table 哈希表的链表 */
+  } u;
+} TString;
+```
+
+Lua用户数据定义
+
+```cpp
+/* Ensures that addresses after this type are always fully aligned. 
+确保此类型之后的地址始终完全对齐。*/
+typedef union UValue {
+  TValue uv;
+  LUAI_MAXALIGN;  /* ensures maximum alignment for udata bytes 确保udata字节的最大对齐 */
+} UValue;
+
+
+/*
+** Header for userdata with user values;
+** memory area follows the end of this structure.
+*/
+typedef struct Udata {
+  CommonHeader;
+  unsigned short nuvalue;  /* number of user values 用户数据的数量 */
+  size_t len;  /* number of bytes 字节数 */
+  struct Table *metatable; /* 元表 */
+  GCObject *gclist;
+  UValue uv[1];  /* user values 用户数据 */
+} Udata;
+
+/*
+** Header for userdata with no user values. These userdata do not need
+** to be gray during GC, and therefore do not need a 'gclist' field.
+** To simplify, the code always use 'Udata' for both kinds of userdata,
+** making sure it never accesses 'gclist' on userdata with no user values.
+** This structure here is used only to compute the correct size for
+** this representation. (The 'bindata' field in its end ensures correct
+** alignment for binary data following this header.)
+**没有用户值的userdata标头。 这些用户数据在GC期间不需要为灰色，因此不需要'gclist'字段。
+**为简化起见，代码始终对两种类型的用户数据都使用“ Udata”，以确保它永远不会在没有用户值的情况下访问用户数据上的“ gclist”。
+**此结构仅用于计算此表示形式的正确大小。 （“ bindata”字段的末尾确保此标头后面的二进制数据正确对齐。）
+*/
+typedef struct Udata0 {
+  CommonHeader;
+  unsigned short nuvalue;  /* number of user values */
+  size_t len;  /* number of bytes */
+  struct Table *metatable;
+  union {LUAI_MAXALIGN;} bindata;
+} Udata0;
+```
+
+函数原型
+
+```cpp
+/*
+** Description of an upvalue for function prototypes
+函数原型升值的描述
+*/
+typedef struct Upvaldesc {
+  TString *name;  /* upvalue name (for debug information) */
+  lu_byte instack;  /* whether it is in stack (register) */
+  lu_byte idx;  /* index of upvalue (in stack or in outer function's list) */
+  lu_byte kind;  /* kind of corresponding variable */
+} Upvaldesc;
+
+
+/*
+** Description of a local variable for function prototypes (used for debug information)
+函数原型的局部变量的描述（用于调试信息）
+*/
+typedef struct LocVar {
+  TString *varname;
+  int startpc;  /* first point where variable is active 变量有效的第一点 */
+  int endpc;    /* first point where variable is dead 变量失效的第一点 */
+} LocVar;
+```
+
+```cpp
+/*
+** Function Prototypes 函数原型
+*/
+typedef struct Proto {
+  CommonHeader;
+  lu_byte numparams;  /* number of fixed (named) parameters 固定（命名）参数的数量 */
+  lu_byte is_vararg;
+  lu_byte maxstacksize;  /* number of registers needed by this function 该功能所需的寄存器数 */
+  int sizeupvalues;  /* size of 'upvalues' 'upvalues'的大小 */
+  int sizek;  /* size of 'k' k的大小 */
+  int sizecode;
+  int sizelineinfo;
+  int sizep;  /* size of 'p' p的大小*/
+  int sizelocvars;
+  int sizeabslineinfo;  /* size of 'abslineinfo' 绝对行信息的大小 */
+  int linedefined;  /* debug information 调试信息：定义的行 */
+  int lastlinedefined;  /* debug information 调试信息：上一个定义的行  */
+  TValue *k;  /* constants used by the function 函数使用的常数 */
+  Instruction *code;  /* opcodes 操作码 */
+  struct Proto **p;  /* functions defined inside the function 函数内部定义的函数 */
+  Upvaldesc *upvalues;  /* upvalue information upvalue信息 */
+  ls_byte *lineinfo;  /* information about source lines (debug information) */
+  AbsLineInfo *abslineinfo;  /* idem */
+  LocVar *locvars;  /* information about local variables (debug information) */
+  TString  *source;  /* used for debug information */
+  GCObject *gclist;
+} Proto;
+```
+
+Lua 闭包类型
+
+```cpp
+/*
+** Upvalues for Lua closures Lua 闭包的升值
+*/
+typedef struct UpVal {
+  CommonHeader;
+  lu_byte tbc;  /* true if it represents a to-be-closed variable */
+  TValue *v;  /* points to stack or to its own value */
+  union {
+    struct {  /* (when open) */
+      struct UpVal *next;  /* linked list */
+      struct UpVal **previous;
+    } open;
+    TValue value;  /* the value (when closed) */
+  } u;
+} UpVal;
+```
+
+```cpp
+#define ClosureHeader \
+	CommonHeader; lu_byte nupvalues; GCObject *gclist
+
+typedef struct CClosure {
+  ClosureHeader;
+  lua_CFunction f;
+  TValue upvalue[1];  /* list of upvalues */
+} CClosure;
+
+
+typedef struct LClosure {
+  ClosureHeader;
+  struct Proto *p;
+  UpVal *upvals[1];  /* list of upvalues */
+} LClosure;
+
+
+typedef union Closure {
+  CClosure c;
+  LClosure l;
+} Closure;
+```
+
+哈希表
+
+```cpp
+/*
+** Nodes for Hash tables: A pack of two TValue's (key-value pairs)
+** plus a 'next' field to link colliding entries. The distribution
+** of the key's fields ('key_tt' and 'key_val') not forming a proper
+** 'TValue' allows for a smaller size for 'Node' both in 4-byte
+** and 8-byte alignments.
+**哈希表的节点：包含两个TValue（键-值对）和一个“ next”字段的链接，用于链接冲突条目。 
+键字段的分布（“ key_tt”和“ key_val”）未形成正确的“ TValue”，从而使“节点”的大小在4字节和8字节对齐方式中均较小。
+*/
+typedef union Node {
+  struct NodeKey {
+    TValuefields;  /* fields for value */
+    lu_byte key_tt;  /* key type */
+    int next;  /* for chaining */
+    Value key_val;  /* key value */
+  } u;
+  TValue i_val;  /* direct access to node's value as a proper 'TValue' */
+} Node;
+```
+
+Lua Table类型定义
+
+```cpp
+typedef struct Table {
+  CommonHeader;
+  lu_byte flags;  /* 1<<p means tagmethod(p) is not present 1 << p表示不存在tagmethod（p） */
+  lu_byte lsizenode;  /* log2 of size of 'node' array “节点”数组大小的log2 */
+  unsigned int alimit;  /* "limit" of 'array' array 数组限制 */
+  TValue *array;  /* array part 数组部分 */
+  Node *node;
+  Node *lastfree;  /* any free position is before this position 任意在这个位置之前的free位置 */
+  struct Table *metatable;
+  GCObject *gclist;
+} Table;
+```
+
+Lua 算术运算
+
+```cpp
+static lua_Integer intarith (lua_State *L, int op, lua_Integer v1,
+                                                   lua_Integer v2) {
+  switch (op) {
+    case LUA_OPADD: return intop(+, v1, v2);
+    case LUA_OPSUB:return intop(-, v1, v2);
+    case LUA_OPMUL:return intop(*, v1, v2);
+    case LUA_OPMOD: return luaV_mod(L, v1, v2);
+    case LUA_OPIDIV: return luaV_idiv(L, v1, v2);
+    case LUA_OPBAND: return intop(&, v1, v2);
+    case LUA_OPBOR: return intop(|, v1, v2);
+    case LUA_OPBXOR: return intop(^, v1, v2);
+    case LUA_OPSHL: return luaV_shiftl(v1, v2);
+    case LUA_OPSHR: return luaV_shiftl(v1, -v2);
+    case LUA_OPUNM: return intop(-, 0, v1);
+    case LUA_OPBNOT: return intop(^, ~l_castS2U(0), v1);
+    default: lua_assert(0); return 0;
+  }
+}
+
+
+static lua_Number numarith (lua_State *L, int op, lua_Number v1,
+                                                  lua_Number v2) {
+  switch (op) {
+    case LUA_OPADD: return luai_numadd(L, v1, v2);
+    case LUA_OPSUB: return luai_numsub(L, v1, v2);
+    case LUA_OPMUL: return luai_nummul(L, v1, v2);
+    case LUA_OPDIV: return luai_numdiv(L, v1, v2);
+    case LUA_OPPOW: return luai_numpow(L, v1, v2);
+    case LUA_OPIDIV: return luai_numidiv(L, v1, v2);
+    case LUA_OPUNM: return luai_numunm(L, v1);
+    case LUA_OPMOD: return luaV_modf(L, v1, v2);
+    default: lua_assert(0); return 0;
+  }
+}
+
+
+int luaO_rawarith (lua_State *L, int op, const TValue *p1, const TValue *p2,
+                   TValue *res) {
+  switch (op) {
+    case LUA_OPBAND: case LUA_OPBOR: case LUA_OPBXOR:
+    case LUA_OPSHL: case LUA_OPSHR:
+    case LUA_OPBNOT: {  /* operate only on integers */
+      lua_Integer i1; lua_Integer i2;
+      if (tointegerns(p1, &i1) && tointegerns(p2, &i2)) {
+        setivalue(res, intarith(L, op, i1, i2));
+        return 1;
+      }
+      else return 0;  /* fail */
+    }
+    case LUA_OPDIV: case LUA_OPPOW: {  /* operate only on floats */
+      lua_Number n1; lua_Number n2;
+      if (tonumberns(p1, n1) && tonumberns(p2, n2)) {
+        setfltvalue(res, numarith(L, op, n1, n2));
+        return 1;
+      }
+      else return 0;  /* fail */
+    }
+    default: {  /* other operations */
+      lua_Number n1; lua_Number n2;
+      if (ttisinteger(p1) && ttisinteger(p2)) {
+        setivalue(res, intarith(L, op, ivalue(p1), ivalue(p2)));
+        return 1;
+      }
+      else if (tonumberns(p1, n1) && tonumberns(p2, n2)) {
+        setfltvalue(res, numarith(L, op, n1, n2));
+        return 1;
+      }
+      else return 0;  /* fail */
+    }
+  }
+}
+
+void luaO_arith (lua_State *L, int op, const TValue *p1, const TValue *p2,
+                 StkId res) {
+  if (!luaO_rawarith(L, op, p1, p2, s2v(res))) {
+    /* could not perform raw operation; try metamethod */
+    luaT_trybinTM(L, p1, p2, res, cast(TMS, (op - LUA_OPADD) + TM_ADD));
+  }
+}
+```
+
+将`lua_Number`转为Lua `TString`
+
+```cpp
+/*
+** Convert a number object to a string, adding it to a buffer
+*/
+static int tostringbuff (TValue *obj, char *buff) {
+  int len;
+  lua_assert(ttisnumber(obj));
+  if (ttisinteger(obj))
+    len = lua_integer2str(buff, MAXNUMBER2STR, ivalue(obj));
+  else {
+    len = lua_number2str(buff, MAXNUMBER2STR, fltvalue(obj));
+    if (buff[strspn(buff, "-0123456789")] == '\0') {  /* looks like an int? */
+      buff[len++] = lua_getlocaledecpoint();
+      buff[len++] = '0';  /* adds '.0' to result */
+    }
+  }
+  return len;
+}
+
+
+/*
+** Convert a number object to a Lua string, replacing the value at 'obj'
+*/
+void luaO_tostring (lua_State *L, TValue *obj) {
+  char buff[MAXNUMBER2STR];
+  int len = tostringbuff(obj, buff);
+  setsvalue(L, obj, luaS_newlstr(L, buff, len));
+}
+```
+
+Lua格式化
+
+```cpp
+/*
+** this function handles only '%d', '%c', '%f', '%p', '%s', and '%%'
+   conventional formats, plus Lua-specific '%I' and '%U'
+*/
+const char *luaO_pushvfstring (lua_State *L, const char *fmt, va_list argp) {
+  BuffFS buff;  /* holds last part of the result */
+  const char *e;  /* points to next '%' */
+  buff.pushed = buff.blen = 0;
+  buff.L = L;
+  while ((e = strchr(fmt, '%')) != NULL) {
+    addstr2buff(&buff, fmt, e - fmt);  /* add 'fmt' up to '%' */
+    switch (*(e + 1)) {  /* conversion specifier */
+      case 's': {  /* zero-terminated string */
+        const char *s = va_arg(argp, char *);
+        if (s == NULL) s = "(null)";
+        addstr2buff(&buff, s, strlen(s));
+        break;
+      }
+      case 'c': {  /* an 'int' as a character */
+        char c = cast_uchar(va_arg(argp, int));
+        addstr2buff(&buff, &c, sizeof(char));
+        break;
+      }
+      case 'd': {  /* an 'int' */
+        TValue num;
+        setivalue(&num, va_arg(argp, int));
+        addnum2buff(&buff, &num);
+        break;
+      }
+      case 'I': {  /* a 'lua_Integer' */
+        TValue num;
+        setivalue(&num, cast(lua_Integer, va_arg(argp, l_uacInt)));
+        addnum2buff(&buff, &num);
+        break;
+      }
+      case 'f': {  /* a 'lua_Number' */
+        TValue num;
+        setfltvalue(&num, cast_num(va_arg(argp, l_uacNumber)));
+        addnum2buff(&buff, &num);
+        break;
+      }
+      case 'p': {  /* a pointer */
+        const int sz = 3 * sizeof(void*) + 8; /* enough space for '%p' */
+        char *bf = getbuff(&buff, sz);
+        void *p = va_arg(argp, void *);
+        int len = lua_pointer2str(bf, sz, p);
+        addsize(&buff, len);
+        break;
+      }
+      case 'U': {  /* a 'long' as a UTF-8 sequence */
+        char bf[UTF8BUFFSZ];
+        int len = luaO_utf8esc(bf, va_arg(argp, long));
+        addstr2buff(&buff, bf + UTF8BUFFSZ - len, len);
+        break;
+      }
+      case '%': {
+        addstr2buff(&buff, "%", 1);
+        break;
+      }
+      default: {
+        luaG_runerror(L, "invalid option '%%%c' to 'lua_pushfstring'",
+                         *(e + 1));
+      }
+    }
+    fmt = e + 2;  /* skip '%' and the specifier */
+  }
+  addstr2buff(&buff, fmt, strlen(fmt));  /* rest of 'fmt' */
+  clearbuff(&buff);  /* empty buffer into the stack */
+  if (buff.pushed > 1)
+    luaV_concat(L, buff.pushed);  /* join all partial results */
+  return svalue(s2v(L->top - 1));
+}
+```
+
 ## Lua Table (hash)
 
 以下为`ltable.c`和`ltable.h`
