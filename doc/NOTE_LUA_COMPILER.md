@@ -2640,7 +2640,197 @@ static const char *const opnames[] = {
 
 ## Lua 字符串
 
-以下为`lstrlib.c`和`lstring.h`
+以下为`lstring.c`和`lstring.h`
+
+Lua TString 函数
+
+```cpp
+LUAI_FUNC unsigned int luaS_hash (const char *str, size_t l, unsigned int seed);
+LUAI_FUNC unsigned int luaS_hashlongstr (TString *ts);
+LUAI_FUNC int luaS_eqlngstr (TString *a, TString *b);
+LUAI_FUNC void luaS_resize (lua_State *L, int newsize);
+LUAI_FUNC void luaS_clearcache (global_State *g);
+LUAI_FUNC void luaS_init (lua_State *L);
+LUAI_FUNC void luaS_remove (lua_State *L, TString *ts);
+LUAI_FUNC Udata *luaS_newudata (lua_State *L, size_t s, int nuvalue);
+LUAI_FUNC TString *luaS_newlstr (lua_State *L, const char *str, size_t l);
+LUAI_FUNC TString *luaS_new (lua_State *L, const char *str);
+LUAI_FUNC TString *luaS_createlngstrobj (lua_State *L, size_t l);
+```
+
+Lua长字符串是通过内存不连续的几个链表组成的，每个链表都是一个连续的字符数组，数组大小为40.
+每次new一个字符串出来，都会检查是否命中缓存。
+
+```cpp
+/*
+** equality for long strings
+判断两个长字符串是否相等
+*/
+int luaS_eqlngstr (TString *a, TString *b) {
+  size_t len = a->u.lnglen;
+  lua_assert(a->tt == LUA_TLNGSTR && b->tt == LUA_TLNGSTR);
+  return (a == b) ||  /* same instance or... */
+    ((len == b->u.lnglen) &&  /* equal length and ... */
+     (memcmp(getstr(a), getstr(b), len) == 0));  /* equal contents */
+}
+
+/* 求字符串的哈希值 */
+unsigned int luaS_hash (const char *str, size_t l, unsigned int seed) {
+  unsigned int h = seed ^ cast_uint(l);
+  size_t step = (l >> LUAI_HASHLIMIT) + 1;
+  for (; l >= step; l -= step)
+      h ^= ((h<<5) + (h>>2) + cast_byte(str[l - 1]));
+  return h;
+}
+
+/* 长字符串的哈希值 */
+unsigned int luaS_hashlongstr (TString *ts) {
+  lua_assert(ts->tt == LUA_TLNGSTR);
+  if (ts->extra == 0) {  /* no hash? */
+    ts->hash = luaS_hash(getstr(ts), ts->u.lnglen, ts->hash);
+    ts->extra = 1;  /* now it has its hash */
+  }
+  return ts->hash;
+}
+```
+
+```cpp
+/*
+** Resize the string table. If allocation fails, keep the current size.
+** (This can degrade performance, but any non-zero size should work correctly.)
+** 调整字符串表的大小。 如果分配失败，请保持当前大小。
+**（这可能会降低性能，但是任何非零大小都应正常工作。）
+*/
+void luaS_resize (lua_State *L, int nsize) {
+  stringtable *tb = &G(L)->strt;
+  int osize = tb->size;
+  TString **newvect;
+  if (nsize < osize)  /* shrinking table? */
+    tablerehash(tb->hash, osize, nsize);  /* depopulate shrinking part */
+  newvect = luaM_reallocvector(L, tb->hash, osize, nsize, TString*);
+  if (unlikely(newvect == NULL)) {  /* reallocation failed? */
+    if (nsize < osize)  /* was it shrinking table? */
+      tablerehash(tb->hash, nsize, osize);  /* restore to original size */
+    /* leave table as it was */
+  }
+  else {  /* allocation succeeded */
+    tb->hash = newvect;
+    tb->size = nsize;
+    if (nsize > osize)
+      tablerehash(newvect, osize, nsize);  /* rehash for new size */
+  }
+}
+
+
+/*
+** Clear API string cache. (Entries cannot be empty, so fill them with a non-collectable string.)
+清除API字符串缓存。 （条目不能为空，因此请使用不可收集的字符串填充它们。）
+*/
+void luaS_clearcache (global_State *g) {
+  int i, j;
+  for (i = 0; i < STRCACHE_N; i++)
+    for (j = 0; j < STRCACHE_M; j++) {
+      if (iswhite(g->strcache[i][j]))  /* will entry be collected? */
+        g->strcache[i][j] = g->memerrmsg;  /* replace it with something fixed */
+    }
+}
+
+
+/*
+** Initialize the string table and the string cache
+初始化字符串表和缓存字符串
+*/
+void luaS_init (lua_State *L) {
+  global_State *g = G(L);
+  int i, j;
+  stringtable *tb = &G(L)->strt;
+  tb->hash = luaM_newvector(L, MINSTRTABSIZE, TString*);
+  tablerehash(tb->hash, 0, MINSTRTABSIZE);  /* clear array */
+  tb->size = MINSTRTABSIZE;
+  /* pre-create memory-error message */
+  g->memerrmsg = luaS_newliteral(L, MEMERRMSG);
+  luaC_fix(L, obj2gco(g->memerrmsg));  /* it should never be collected */
+  for (i = 0; i < STRCACHE_N; i++)  /* fill cache with valid strings */
+    for (j = 0; j < STRCACHE_M; j++)
+      g->strcache[i][j] = g->memerrmsg;
+}
+
+TString *luaS_createlngstrobj (lua_State *L, size_t l) {
+  TString *ts = createstrobj(L, l, LUA_TLNGSTR, G(L)->seed);
+  ts->u.lnglen = l;
+  return ts;
+}
+
+
+void luaS_remove (lua_State *L, TString *ts) {
+  stringtable *tb = &G(L)->strt;
+  TString **p = &tb->hash[lmod(ts->hash, tb->size)];
+  while (*p != ts)  /* find previous element */
+    p = &(*p)->u.hnext;
+  *p = (*p)->u.hnext;  /* remove element from its list */
+  tb->nuse--;
+}
+
+/*
+** new string (with explicit length)
+新建一个字符串
+*/
+TString *luaS_newlstr (lua_State *L, const char *str, size_t l) {
+  if (l <= LUAI_MAXSHORTLEN)  /* short string? */
+    return internshrstr(L, str, l);
+  else {
+    TString *ts;
+    if (unlikely(l >= (MAX_SIZE - sizeof(TString))/sizeof(char)))
+      luaM_toobig(L);
+    ts = luaS_createlngstrobj(L, l);
+    memcpy(getstr(ts), str, l * sizeof(char));
+    return ts;
+  }
+}
+
+/*
+** Create or reuse a zero-terminated string, first checking in the
+cache (using the string address as a key). The cache can contain
+** only zero-terminated strings, so it is safe to use 'strcmp' to
+** check hits.
+创建或重用零结尾的字符串，首先在高速缓存中签入（使用字符串地址作为键）。 缓存只能包含以零结尾的字符串，因此使用'strcmp'检查命中是安全的。
+*/
+TString *luaS_new (lua_State *L, const char *str) {
+  unsigned int i = point2uint(str) % STRCACHE_N;  /* hash */
+  int j;
+  TString **p = G(L)->strcache[i];
+  for (j = 0; j < STRCACHE_M; j++) {
+    if (strcmp(str, getstr(p[j])) == 0)  /* hit? */
+      return p[j];  /* that is it */
+  }
+  /* normal route */
+  for (j = STRCACHE_M - 1; j > 0; j--)
+    p[j] = p[j - 1];  /* move out last element */
+  /* new element is first in the list */
+  p[0] = luaS_newlstr(L, str, strlen(str));
+  return p[0];
+}
+```
+
+Lua新建一个用户对象
+
+```cpp
+Udata *luaS_newudata (lua_State *L, size_t s, int nuvalue) {
+  Udata *u;
+  int i;
+  GCObject *o;
+  if (unlikely(s > MAX_SIZE - udatamemoffset(nuvalue)))
+    luaM_toobig(L);
+  o = luaC_newobj(L, LUA_TUSERDATA, sizeudata(nuvalue, s));
+  u = gco2u(o);
+  u->len = s;
+  u->nuvalue = nuvalue;
+  u->metatable = NULL;
+  for (i = 0; i < nuvalue; i++)
+    setnilvalue(&u->uv[i].uv);
+  return u;
+}
+```
 
 ## Lua 函数库
 
@@ -2677,7 +2867,6 @@ static const char *const opnames[] = {
 ### 标准输入输出I/O库
 
 以下为`liolib.c`
-
 
 
 ### Lua utf8库
