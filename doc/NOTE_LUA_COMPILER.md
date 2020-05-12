@@ -2844,7 +2844,305 @@ Udata *luaS_newudata (lua_State *L, size_t s, int nuvalue) {
 
 ### Lua string库
 
-以下为`lstring.c`,
+以下为`lstrlib.c`,
+
+```cpp
+static int str_sub (lua_State *L) {
+  size_t l;
+  const char *s = luaL_checklstring(L, 1, &l);
+  size_t start = posrelatI(luaL_checkinteger(L, 2), l);
+  size_t end = getendpos(L, 3, -1, l);
+  if (start <= end)
+    lua_pushlstring(L, s + start - 1, (end - start) + 1);
+  else lua_pushliteral(L, "");
+  return 1;
+}
+
+
+static int str_reverse (lua_State *L) {
+  size_t l, i;
+  luaL_Buffer b;
+  const char *s = luaL_checklstring(L, 1, &l);
+  char *p = luaL_buffinitsize(L, &b, l);
+  for (i = 0; i < l; i++)
+    p[i] = s[l - i - 1];
+  luaL_pushresultsize(&b, l);
+  return 1;
+}
+
+
+static int str_lower (lua_State *L) {
+  size_t l;
+  size_t i;
+  luaL_Buffer b;
+  const char *s = luaL_checklstring(L, 1, &l);
+  char *p = luaL_buffinitsize(L, &b, l);
+  for (i=0; i<l; i++)
+    p[i] = tolower(uchar(s[i]));
+  luaL_pushresultsize(&b, l);
+  return 1;
+}
+
+
+static int str_upper (lua_State *L) {
+  size_t l;
+  size_t i;
+  luaL_Buffer b;
+  const char *s = luaL_checklstring(L, 1, &l);
+  char *p = luaL_buffinitsize(L, &b, l);
+  for (i=0; i<l; i++)
+    p[i] = toupper(uchar(s[i]));
+  luaL_pushresultsize(&b, l);
+  return 1;
+}
+
+
+static int str_rep (lua_State *L) {
+  size_t l, lsep;
+  const char *s = luaL_checklstring(L, 1, &l);
+  lua_Integer n = luaL_checkinteger(L, 2);
+  const char *sep = luaL_optlstring(L, 3, "", &lsep);
+  if (n <= 0) lua_pushliteral(L, "");
+  else if (l + lsep < l || l + lsep > MAXSIZE / n)  /* may overflow? */
+    return luaL_error(L, "resulting string too large");
+  else {
+    size_t totallen = (size_t)n * l + (size_t)(n - 1) * lsep;
+    luaL_Buffer b;
+    char *p = luaL_buffinitsize(L, &b, totallen);
+    while (n-- > 1) {  /* first n-1 copies (followed by separator) */
+      memcpy(p, s, l * sizeof(char)); p += l;
+      if (lsep > 0) {  /* empty 'memcpy' is not that cheap */
+        memcpy(p, sep, lsep * sizeof(char));
+        p += lsep;
+      }
+    }
+    memcpy(p, s, l * sizeof(char));  /* last copy (not followed by separator) */
+    luaL_pushresultsize(&b, totallen);
+  }
+  return 1;
+}
+
+
+static int str_byte (lua_State *L) {
+  size_t l;
+  const char *s = luaL_checklstring(L, 1, &l);
+  lua_Integer pi = luaL_optinteger(L, 2, 1);
+  size_t posi = posrelatI(pi, l);
+  size_t pose = getendpos(L, 3, pi, l);
+  int n, i;
+  if (posi > pose) return 0;  /* empty interval; return no values */
+  if (pose - posi >= (size_t)INT_MAX)  /* arithmetic overflow? */
+    return luaL_error(L, "string slice too long");
+  n = (int)(pose -  posi) + 1;
+  luaL_checkstack(L, n, "string slice too long");
+  for (i=0; i<n; i++)
+    lua_pushinteger(L, uchar(s[posi+i-1]));
+  return n;
+}
+
+
+static int str_char (lua_State *L) {
+  int n = lua_gettop(L);  /* number of arguments */
+  int i;
+  luaL_Buffer b;
+  char *p = luaL_buffinitsize(L, &b, n);
+  for (i=1; i<=n; i++) {
+    lua_Unsigned c = (lua_Unsigned)luaL_checkinteger(L, i);
+    luaL_argcheck(L, c <= (lua_Unsigned)UCHAR_MAX, i, "value out of range");
+    p[i - 1] = uchar(c);
+  }
+  luaL_pushresultsize(&b, n);
+  return 1;
+}
+```
+
+Lua字符串正则表达式匹配
+
+```cpp
+typedef struct MatchState {
+  const char *src_init;  /* init of source string */
+  const char *src_end;  /* end ('\0') of source string */
+  const char *p_end;  /* end ('\0') of pattern */
+  lua_State *L;
+  int matchdepth;  /* control for recursive depth (to avoid C stack overflow) */
+  unsigned char level;  /* total number of captures (finished or unfinished) */
+  struct {
+    const char *init;
+    ptrdiff_t len;
+  } capture[LUA_MAXCAPTURES];
+} MatchState;
+
+
+static const char *match (MatchState *ms, const char *s, const char *p) {
+  if (ms->matchdepth-- == 0)
+    luaL_error(ms->L, "pattern too complex");
+  init: /* using goto's to optimize tail recursion */
+  if (p != ms->p_end) {  /* end of pattern? */
+    switch (*p) {
+      case '(': {  /* start capture */
+        if (*(p + 1) == ')')  /* position capture? */
+          s = start_capture(ms, s, p + 2, CAP_POSITION);
+        else
+          s = start_capture(ms, s, p + 1, CAP_UNFINISHED);
+        break;
+      }
+      case ')': {  /* end capture */
+        s = end_capture(ms, s, p + 1);
+        break;
+      }
+      case '$': {
+        if ((p + 1) != ms->p_end)  /* is the '$' the last char in pattern? */
+          goto dflt;  /* no; go to default */
+        s = (s == ms->src_end) ? s : NULL;  /* check end of string */
+        break;
+      }
+      case L_ESC: {  /* escaped sequences not in the format class[*+?-]? */
+        switch (*(p + 1)) {
+          case 'b': {  /* balanced string? */
+            s = matchbalance(ms, s, p + 2);
+            if (s != NULL) {
+              p += 4; goto init;  /* return match(ms, s, p + 4); */
+            }  /* else fail (s == NULL) */
+            break;
+          }
+          case 'f': {  /* frontier? */
+            const char *ep; char previous;
+            p += 2;
+            if (*p != '[')
+              luaL_error(ms->L, "missing '[' after '%%f' in pattern");
+            ep = classend(ms, p);  /* points to what is next */
+            previous = (s == ms->src_init) ? '\0' : *(s - 1);
+            if (!matchbracketclass(uchar(previous), p, ep - 1) &&
+               matchbracketclass(uchar(*s), p, ep - 1)) {
+              p = ep; goto init;  /* return match(ms, s, ep); */
+            }
+            s = NULL;  /* match failed */
+            break;
+          }
+          case '0': case '1': case '2': case '3':
+          case '4': case '5': case '6': case '7':
+          case '8': case '9': {  /* capture results (%0-%9)? */
+            s = match_capture(ms, s, uchar(*(p + 1)));
+            if (s != NULL) {
+              p += 2; goto init;  /* return match(ms, s, p + 2) */
+            }
+            break;
+          }
+          default: goto dflt;
+        }
+        break;
+      }
+      default: dflt: {  /* pattern class plus optional suffix */
+        const char *ep = classend(ms, p);  /* points to optional suffix */
+        /* does not match at least once? */
+        if (!singlematch(ms, s, p, ep)) {
+          if (*ep == '*' || *ep == '?' || *ep == '-') {  /* accept empty? */
+            p = ep + 1; goto init;  /* return match(ms, s, ep + 1); */
+          }
+          else  /* '+' or no suffix */
+            s = NULL;  /* fail */
+        }
+        else {  /* matched once */
+          switch (*ep) {  /* handle optional suffix */
+            case '?': {  /* optional */
+              const char *res;
+              if ((res = match(ms, s + 1, ep + 1)) != NULL)
+                s = res;
+              else {
+                p = ep + 1; goto init;  /* else return match(ms, s, ep + 1); */
+              }
+              break;
+            }
+            case '+':  /* 1 or more repetitions */
+              s++;  /* 1 match already done */
+              /* FALLTHROUGH */
+            case '*':  /* 0 or more repetitions */
+              s = max_expand(ms, s, p, ep);
+              break;
+            case '-':  /* 0 or more repetitions (minimum) */
+              s = min_expand(ms, s, p, ep);
+              break;
+            default:  /* no suffix */
+              s++; p = ep; goto init;  /* return match(ms, s + 1, ep); */
+          }
+        }
+        break;
+      }
+    }
+  }
+  ms->matchdepth++;
+  return s;
+}
+```
+
+字符串格式化函数
+
+```cpp
+/*
+** Read and classify next option. 'size' is filled with option's size.
+*/
+static KOption getoption (Header *h, const char **fmt, int *size) {
+  int opt = *((*fmt)++);
+  *size = 0;  /* default */
+  switch (opt) {
+    case 'b': *size = sizeof(char); return Kint;
+    case 'B': *size = sizeof(char); return Kuint;
+    case 'h': *size = sizeof(short); return Kint;
+    case 'H': *size = sizeof(short); return Kuint;
+    case 'l': *size = sizeof(long); return Kint;
+    case 'L': *size = sizeof(long); return Kuint;
+    case 'j': *size = sizeof(lua_Integer); return Kint;
+    case 'J': *size = sizeof(lua_Integer); return Kuint;
+    case 'T': *size = sizeof(size_t); return Kuint;
+    case 'f': *size = sizeof(float); return Kfloat;
+    case 'd': *size = sizeof(double); return Kfloat;
+    case 'n': *size = sizeof(lua_Number); return Kfloat;
+    case 'i': *size = getnumlimit(h, fmt, sizeof(int)); return Kint;
+    case 'I': *size = getnumlimit(h, fmt, sizeof(int)); return Kuint;
+    case 's': *size = getnumlimit(h, fmt, sizeof(size_t)); return Kstring;
+    case 'c':
+      *size = getnum(fmt, -1);
+      if (*size == -1)
+        luaL_error(h->L, "missing size for format option 'c'");
+      return Kchar;
+    case 'z': return Kzstr;
+    case 'x': *size = 1; return Kpadding;
+    case 'X': return Kpaddalign;
+    case ' ': break;
+    case '<': h->islittle = 1; break;
+    case '>': h->islittle = 0; break;
+    case '=': h->islittle = nativeendian.little; break;
+    case '!': h->maxalign = getnumlimit(h, fmt, MAXALIGN); break;
+    default: luaL_error(h->L, "invalid format option '%c'", opt);
+  }
+  return Knop;
+}
+```
+
+所有Lua字符串函数
+
+```cpp
+static const luaL_Reg strlib[] = {
+  {"byte", str_byte},
+  {"char", str_char},
+  {"dump", str_dump},
+  {"find", str_find},
+  {"format", str_format},
+  {"gmatch", gmatch},
+  {"gsub", str_gsub},
+  {"len", str_len},
+  {"lower", str_lower},
+  {"match", str_match},
+  {"rep", str_rep},
+  {"reverse", str_reverse},
+  {"sub", str_sub},
+  {"upper", str_upper},
+  {"pack", str_pack},
+  {"packsize", str_packsize},
+  {"unpack", str_unpack},
+  {NULL, NULL}
+};
+```
 
 ### Lua table库
 
