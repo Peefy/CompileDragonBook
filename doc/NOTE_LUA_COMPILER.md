@@ -1,6 +1,8 @@
 
 # Lua 编译器源码笔记
 
+主要包括了词法分析器，语法分析器，虚拟机(runtime，堆栈结构，操作码)，垃圾回收器，代码生成器以及Lua对象，Lua函数库，Lua调试等。
+
 ## Lua 主函数和命令行程序
 
 ### Lua 全局状态
@@ -2462,7 +2464,7 @@ const char *luaO_pushvfstring (lua_State *L, const char *fmt, va_list argp) {
 
 ## Lua 限制 (Limit)
 
-以下为`llimit.c`和`llimit.h`
+以下为`llimit.h`
 
 限制，基本类型和其他一些“与安装有关的”定义
 
@@ -2676,9 +2678,224 @@ static const char *const opnames[] = {
 
 以下为`liolib.c`
 
+
+
 ### Lua utf8库
 
 以下为`lutf8lib.c`
+
+### Lua 动态库加载器库
+
+以下为`loadlib.c`
+
+此模块包含具有dlfcn的Unix系统的loadlib实现，Windows的实现以及其他系统的存根。
+
+```cpp
+/*
+** LUA_CSUBSEP is the character that replaces dots in submodule names
+** when searching for a C loader.
+** LUA_LSUBSEP is the character that replaces dots in submodule names
+** when searching for a Lua loader.
+** LUA_CSUBSEP是在搜索C加载程序时替换子模块名称中点的字符。
+** LUA_LSUBSEP是在搜索Lua加载程序时替换子模块名称中点的字符。
+*/
+#if !defined(LUA_CSUBSEP)
+#define LUA_CSUBSEP		LUA_DIRSEP
+#endif
+
+#if !defined(LUA_LSUBSEP)
+#define LUA_LSUBSEP		LUA_DIRSEP
+#endif
+```
+
+```cpp
+#if defined(LUA_USE_DLOPEN)	/* { */
+/*
+** {========================================================================
+** This is an implementation of loadlib based on the dlfcn interface.
+** The dlfcn interface is available in Linux, SunOS, Solaris, IRIX, FreeBSD,
+** NetBSD, AIX 4.2, HPUX 11, and  probably most other Unix flavors, at least
+** as an emulation layer on top of native functions.
+**这是基于dlfcn接口的loadlib的实现。
+** dlfcn界面在Linux，SunOS，Solaris，IRIX，FreeBSD，
+**至少NetBSD，AIX 4.2，HPUX 11和大多数其他Unix版本
+**作为本机功能之上的仿真层。
+** =========================================================================
+*/
+
+#include <dlfcn.h>
+
+/*
+** Macro to convert pointer-to-void* to pointer-to-function. This cast
+** is undefined according to ISO C, but POSIX assumes that it works.
+** (The '__extension__' in gnu compilers is only to avoid warnings.)
+*/
+#if defined(__GNUC__)
+#define cast_func(p) (__extension__ (lua_CFunction)(p))
+#else
+#define cast_func(p) ((lua_CFunction)(p))
+#endif
+
+
+static void lsys_unloadlib (void *lib) {
+  dlclose(lib);
+}
+
+
+static void *lsys_load (lua_State *L, const char *path, int seeglb) {
+  void *lib = dlopen(path, RTLD_NOW | (seeglb ? RTLD_GLOBAL : RTLD_LOCAL));
+  if (lib == NULL) lua_pushstring(L, dlerror());
+  return lib;
+}
+
+
+static lua_CFunction lsys_sym (lua_State *L, void *lib, const char *sym) {
+  lua_CFunction f = cast_func(dlsym(lib, sym));
+  if (f == NULL) lua_pushstring(L, dlerror());
+  return f;
+}
+
+/* }====================================================== */
+
+
+
+#elif defined(LUA_DL_DLL)	/* }{ */
+/*
+** {======================================================================
+** This is an implementation of loadlib for Windows using native functions.
+这是使用本机函数的Windows的loadlib的实现。
+** =======================================================================
+*/
+
+#include <windows.h>
+
+
+/*
+** optional flags for LoadLibraryEx
+*/
+#if !defined(LUA_LLE_FLAGS)
+#define LUA_LLE_FLAGS	0
+#endif
+
+
+#undef setprogdir
+
+
+/*
+** Replace in the path (on the top of the stack) any occurrence
+** of LUA_EXEC_DIR with the executable's path.
+*/
+static void setprogdir (lua_State *L) {
+  char buff[MAX_PATH + 1];
+  char *lb;
+  DWORD nsize = sizeof(buff)/sizeof(char);
+  DWORD n = GetModuleFileNameA(NULL, buff, nsize);  /* get exec. name */
+  if (n == 0 || n == nsize || (lb = strrchr(buff, '\\')) == NULL)
+    luaL_error(L, "unable to get ModuleFileName");
+  else {
+    *lb = '\0';  /* cut name on the last '\\' to get the path */
+    luaL_gsub(L, lua_tostring(L, -1), LUA_EXEC_DIR, buff);
+    lua_remove(L, -2);  /* remove original string */
+  }
+}
+
+
+
+
+static void pusherror (lua_State *L) {
+  int error = GetLastError();
+  char buffer[128];
+  if (FormatMessageA(FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_FROM_SYSTEM,
+      NULL, error, 0, buffer, sizeof(buffer)/sizeof(char), NULL))
+    lua_pushstring(L, buffer);
+  else
+    lua_pushfstring(L, "system error %d\n", error);
+}
+
+static void lsys_unloadlib (void *lib) {
+  FreeLibrary((HMODULE)lib);
+}
+
+
+static void *lsys_load (lua_State *L, const char *path, int seeglb) {
+  HMODULE lib = LoadLibraryExA(path, NULL, LUA_LLE_FLAGS);
+  (void)(seeglb);  /* not used: symbols are 'global' by default */
+  if (lib == NULL) pusherror(L);
+  return lib;
+}
+
+
+static lua_CFunction lsys_sym (lua_State *L, void *lib, const char *sym) {
+  lua_CFunction f = (lua_CFunction)GetProcAddress((HMODULE)lib, sym);
+  if (f == NULL) pusherror(L);
+  return f;
+}
+
+/* }====================================================== */
+
+
+#else				/* }{ */
+/*
+** {======================================================
+** Fallback for other systems
+** =======================================================
+*/
+
+#undef LIB_FAIL
+#define LIB_FAIL	"absent"
+
+
+#define DLMSG	"dynamic libraries not enabled; check your Lua installation"
+
+
+static void lsys_unloadlib (void *lib) {
+  (void)(lib);  /* not used */
+}
+
+
+static void *lsys_load (lua_State *L, const char *path, int seeglb) {
+  (void)(path); (void)(seeglb);  /* not used */
+  lua_pushliteral(L, DLMSG);
+  return NULL;
+}
+
+
+static lua_CFunction lsys_sym (lua_State *L, void *lib, const char *sym) {
+  (void)(lib); (void)(sym);  /* not used */
+  lua_pushliteral(L, DLMSG);
+  return NULL;
+}
+
+/* }====================================================== */
+#endif				/* } */
+
+```
+
+```cpp
+LUAMOD_API int luaopen_package (lua_State *L) {
+  createclibstable(L);
+  luaL_newlib(L, pk_funcs);  /* create 'package' table */
+  createsearcherstable(L);
+  /* set paths */
+  setpath(L, "path", LUA_PATH_VAR, LUA_PATH_DEFAULT);
+  setpath(L, "cpath", LUA_CPATH_VAR, LUA_CPATH_DEFAULT);
+  /* store config information */
+  lua_pushliteral(L, LUA_DIRSEP "\n" LUA_PATH_SEP "\n" LUA_PATH_MARK "\n"
+                     LUA_EXEC_DIR "\n" LUA_IGMARK "\n");
+  lua_setfield(L, -2, "config");
+  /* set field 'loaded' */
+  luaL_getsubtable(L, LUA_REGISTRYINDEX, LUA_LOADED_TABLE);
+  lua_setfield(L, -2, "loaded");
+  /* set field 'preload' */
+  luaL_getsubtable(L, LUA_REGISTRYINDEX, LUA_PRELOAD_TABLE);
+  lua_setfield(L, -2, "preload");
+  lua_pushglobaltable(L);
+  lua_pushvalue(L, -2);  /* set 'package' as upvalue for next lib */
+  luaL_setfuncs(L, ll_funcs, 1);  /* open lib into global table */
+  lua_pop(L, 1);  /* pop global table */
+  return 1;  /* return 'package' table */
+}
+```
 
 ## Lua 代码生成器
 
@@ -2688,9 +2905,32 @@ static const char *const opnames[] = {
 
 以下为`lctype.c`和`lctype.h`
 
-## Lua 动态库加载器
+```cpp
+/*
+** add 1 to char to allow index -1 (EOZ)
+*/
+#define testprop(c,p)	(luai_ctype_[(c)+1] & (p))
 
-以下为`loadlib.c`
+/*
+** 'lalpha' (Lua alphabetic) and 'lalnum' (Lua alphanumeric) both include '_'
+*/
+#define lislalpha(c)	testprop(c, MASK(ALPHABIT))
+#define lislalnum(c)	testprop(c, (MASK(ALPHABIT) | MASK(DIGITBIT)))
+#define lisdigit(c)	testprop(c, MASK(DIGITBIT))
+#define lisspace(c)	testprop(c, MASK(SPACEBIT))
+#define lisprint(c)	testprop(c, MASK(PRINTBIT))
+#define lisxdigit(c)	testprop(c, MASK(XDIGITBIT))
+
+/*
+** this 'ltolower' only works for alphabetic characters
+这个“函数”仅适用于字母字符
+*/
+#define ltolower(c)	((c) | ('A' ^ 'a'))
+
+
+/* two more entries for 0 and -1 (EOZ) */
+LUAI_DDEC(const lu_byte luai_ctype_[UCHAR_MAX + 2];)
+```
 
 ## Lua 调试 (Debug)
 
