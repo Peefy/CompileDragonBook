@@ -3483,7 +3483,62 @@ lua_Unsigned luaH_getn (Table *t) {
 
 以下为`lcorolib.c`和`lcorolib.h`
 
-#### Lua 线程 
+Lua 协程库函数
+
+```cpp
+static const luaL_Reg co_funcs[] = {
+  {"create", luaB_cocreate},
+  {"resume", luaB_coresume},
+  {"running", luaB_corunning},
+  {"status", luaB_costatus},
+  {"wrap", luaB_cowrap},
+  {"yield", luaB_yield},
+  {"isyieldable", luaB_yieldable},
+  {"close", luaB_close},
+  {NULL, NULL}
+};
+```
+
+```cpp
+static int luaB_cocreate (lua_State *L) {
+  lua_State *NL;
+  luaL_checktype(L, 1, LUA_TFUNCTION);
+  NL = lua_newthread(L);
+  lua_pushvalue(L, 1);  /* move function to top */
+  lua_xmove(L, NL, 1);  /* move function from L to NL */
+  return 1;
+}
+
+LUA_API lua_State *lua_newthread (lua_State *L) {
+  global_State *g = G(L);
+  lua_State *L1;
+  lua_lock(L);
+  luaC_checkGC(L);
+  /* create new thread */
+  L1 = &cast(LX *, luaM_newobject(L, LUA_TTHREAD, sizeof(LX)))->l;
+  L1->marked = luaC_white(g);
+  L1->tt = LUA_TTHREAD;
+  /* link it on list 'allgc' */
+  L1->next = g->allgc;
+  g->allgc = obj2gco(L1);
+  /* anchor it on L stack */
+  setthvalue2s(L, L->top, L1);
+  api_incr_top(L);
+  preinit_thread(L1, g);
+  L1->nCcalls = getCcalls(L);
+  L1->hookmask = L->hookmask;
+  L1->basehookcount = L->basehookcount;
+  L1->hook = L->hook;
+  resethookcount(L1);
+  /* initialize L1 extra space */
+  memcpy(lua_getextraspace(L1), lua_getextraspace(g->mainthread),
+         LUA_EXTRASPACE);
+  luai_userstatethread(L, L1);
+  stack_init(L1, L);  /* init stack */
+  lua_unlock(L);
+  return L1;
+}
+```
 
 ### 操作系统库
 
@@ -3492,7 +3547,6 @@ lua_Unsigned luaH_getn (Table *t) {
 ### 标准输入输出I/O库
 
 以下为`liolib.c`
-
 
 ### Lua utf8库
 
@@ -3714,6 +3768,8 @@ LUAMOD_API int luaopen_package (lua_State *L) {
 ## Lua 代码生成器
 
 以下为`lcode.c`和`lcode.h`
+
+将语法解析器生成的AST转换成虚拟机可以调用运行的代码。
 
 ## Lua C类型函数
 
