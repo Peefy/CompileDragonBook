@@ -3148,6 +3148,333 @@ static const luaL_Reg strlib[] = {
 
 以下为`ltable.c`和`ltable.h`
 
+Lua表（又名数组，对象或哈希表）的实现。表将其元素分为两部分：数组部分和哈希部分。
+
+非负整数键是要保留在数组部分中的所有候选项。 数组的实际大小是最大的“ n”，因此使用了介于1和n之间的插槽的一半以上。
+
+Hash结合使用链式散布表和Brent的变体。这些表格的主要不变之处在于，如果元素不在其主要位置（即，其散列赋予其的“原始”位置），则碰撞元素将位于其自己的主要位置。因此，即使负载率达到100％，性能仍然保持良好。
+
+Lua Table API
+
+```cpp
+LUAI_FUNC const TValue *luaH_getint (Table *t, lua_Integer key);
+LUAI_FUNC void luaH_setint (lua_State *L, Table *t, lua_Integer key,
+                                                    TValue *value);
+LUAI_FUNC const TValue *luaH_getshortstr (Table *t, TString *key);
+LUAI_FUNC const TValue *luaH_getstr (Table *t, TString *key);
+LUAI_FUNC const TValue *luaH_get (Table *t, const TValue *key);
+LUAI_FUNC TValue *luaH_newkey (lua_State *L, Table *t, const TValue *key);
+LUAI_FUNC TValue *luaH_set (lua_State *L, Table *t, const TValue *key);
+LUAI_FUNC Table *luaH_new (lua_State *L);
+LUAI_FUNC void luaH_resize (lua_State *L, Table *t, unsigned int nasize,
+                                                    unsigned int nhsize);
+LUAI_FUNC void luaH_resizearray (lua_State *L, Table *t, unsigned int nasize);
+LUAI_FUNC void luaH_free (lua_State *L, Table *t);
+LUAI_FUNC int luaH_next (lua_State *L, Table *t, StkId key);
+LUAI_FUNC lua_Unsigned luaH_getn (Table *t);
+LUAI_FUNC unsigned int luaH_realasize (const Table *t);
+```
+
+```cpp
+/*
+** Returns the real size of the 'array' array
+返回“数组”数组的实际大小
+*/
+LUAI_FUNC unsigned int luaH_realasize (const Table *t) {
+  if (limitequalsasize(t))
+    return t->alimit;  /* this is the size */
+  else {
+    unsigned int size = t->alimit;
+    /* compute the smallest power of 2 not smaller than 'n' */
+    size |= (size >> 1);
+    size |= (size >> 2);
+    size |= (size >> 4);
+    size |= (size >> 8);
+    size |= (size >> 16);
+#if (UINT_MAX >> 30) > 3
+    size |= (size >> 32);  /* unsigned int has more than 32 bits */
+#endif
+    size++;
+    lua_assert(ispow2(size) && size/2 < t->alimit && t->alimit < size);
+    return size;
+  }
+}
+```
+
+```cpp
+/*
+** Compute the optimal size for the array part of table 't'. 'nums' is a
+** "count array" where 'nums[i]' is the number of integers in the table
+** between 2^(i - 1) + 1 and 2^i. 'pna' enters with the total number of
+** integer keys in the table and leaves with the number of keys that
+** will go to the array part; return the optimal size.  (The condition
+** 'twotoi > 0' in the for loop stops the loop if 'twotoi' overflows.)
+计算表't'的数组部分的最佳大小。 “ nums”是“计数数组”，其中“ nums [i]”是表中2 ^（i-1）+1和2 ^ i之间的整数数。
+“ pna”以表中整数键的总数输入，而留下将要到达数组部分的键数； 返回最佳尺寸。
+（如果“ twotoi”溢出，则for循环中的条件“ twotoi> 0”将停止循环。）
+*/
+static unsigned int computesizes (unsigned int nums[], unsigned int *pna) {
+  int i;
+  unsigned int twotoi;  /* 2^i (candidate for optimal size) */
+  unsigned int a = 0;  /* number of elements smaller than 2^i */
+  unsigned int na = 0;  /* number of elements to go to array part */
+  unsigned int optimal = 0;  /* optimal size for array part */
+  /* loop while keys can fill more than half of total size */
+  for (i = 0, twotoi = 1;
+       twotoi > 0 && *pna > twotoi / 2;
+       i++, twotoi *= 2) {
+    a += nums[i];
+    if (a > twotoi/2) {  /* more than half elements present? */
+      optimal = twotoi;  /* optimal size (till now) */
+      na = a;  /* all elements up to 'optimal' will go to array part */
+    }
+  }
+  lua_assert((optimal == 0 || optimal / 2 < na) && na <= optimal);
+  *pna = na;
+  return optimal;
+}
+```
+
+```cpp
+/*
+** Resize table 't' for the new given sizes. Both allocations (for
+** the hash part and for the array part) can fail, which creates some
+** subtleties. If the first allocation, for the hash part, fails, an
+** error is raised and that is it. Otherwise, it copies the elements from
+** the shrinking part of the array (if it is shrinking) into the new
+** hash. Then it reallocates the array part.  If that fails, the table
+** is in its original state; the function frees the new hash part and then
+** raises the allocation error. Otherwise, it sets the new hash part
+** into the table, initializes the new part of the array (if any) with
+** nils and reinserts the elements of the old hash back into the new
+** parts of the table.
+为新的给定尺寸调整表't'的尺寸。 两种分配（用于散列部分和用于数组部分）都可能失败，这会导致som的细微差别。 
+如果针对哈希部分的第一次分配失败，则会引发错误，仅此而已。 否则，它将元素从数组的收缩部分（如果正在收缩）
+复制到新的哈希中。 然后，它重新分配数组部分。 如果失败，则表处于原始状态； 该函数释放新的哈希部分，
+然后引发分配错误。 否则，它将新的哈希部分设置到表中，使用nil初始化数组的新部分（如果有），
+然后将旧哈希的元素重新插入表的新部分。
+*/
+void luaH_resize (lua_State *L, Table *t, unsigned int newasize,
+                                          unsigned int nhsize) {
+  unsigned int i;
+  Table newt;  /* to keep the new hash part */
+  unsigned int oldasize = setlimittosize(t);
+  TValue *newarray;
+  /* create new hash part with appropriate size into 'newt' */
+  setnodevector(L, &newt, nhsize);
+  if (newasize < oldasize) {  /* will array shrink? */
+    t->alimit = newasize;  /* pretend array has new size... */
+    exchangehashpart(t, &newt);  /* and new hash */
+    /* re-insert into the new hash the elements from vanishing slice */
+    for (i = newasize; i < oldasize; i++) {
+      if (!isempty(&t->array[i]))
+        luaH_setint(L, t, i + 1, &t->array[i]);
+    }
+    t->alimit = oldasize;  /* restore current size... */
+    exchangehashpart(t, &newt);  /* and hash (in case of errors) */
+  }
+  /* allocate new array */
+  newarray = luaM_reallocvector(L, t->array, oldasize, newasize, TValue);
+  if (unlikely(newarray == NULL && newasize > 0)) {  /* allocation failed? */
+    freehash(L, &newt);  /* release new hash part */
+    luaM_error(L);  /* raise error (with array unchanged) */
+  }
+  /* allocation ok; initialize new part of the array */
+  exchangehashpart(t, &newt);  /* 't' has the new hash ('newt' has the old) */
+  t->array = newarray;  /* set new array part */
+  t->alimit = newasize;
+  for (i = oldasize; i < newasize; i++)  /* clear new slice of the array */
+     setempty(&t->array[i]);
+  /* re-insert elements from old hash part into new parts */
+  reinsert(L, &newt, t);  /* 'newt' now has the old hash */
+  freehash(L, &newt);  /* free old hash part */
+}
+```
+
+Lua新建表
+
+```cpp
+Table *luaH_new (lua_State *L) {
+  GCObject *o = luaC_newobj(L, LUA_TTABLE, sizeof(Table));
+  Table *t = gco2t(o);
+  t->metatable = NULL;
+  t->flags = cast_byte(~0);
+  t->array = NULL;
+  t->alimit = 0;
+  setnodevector(L, t, 0);
+  return t;
+}
+```
+
+```cpp
+/*
+** inserts a new key into a hash table; first, check whether key's main
+** position is free. If not, check whether colliding node is in its main
+** position or not: if it is not, move colliding node to an empty place and
+** put new key in its main position; otherwise (colliding node is in its main
+** position), new key goes to an empty position.
+将新密钥插入哈希表； 首先，检查钥匙的主要位置是否空闲。 
+如果不是，则检查碰撞节点是否位于其主要位置：如果不是，请将碰撞节点移至空白处并将新钥匙置于其主要位置；
+否则（冲突节点位于其主要位置），新密钥将移至空位置。
+*/
+TValue *luaH_newkey (lua_State *L, Table *t, const TValue *key) {
+  Node *mp;
+  TValue aux;
+  if (unlikely(ttisnil(key)))
+    luaG_runerror(L, "table index is nil");
+  else if (ttisfloat(key)) {
+    lua_Number f = fltvalue(key);
+    lua_Integer k;
+    if (luaV_flttointeger(f, &k, 0)) {  /* does key fit in an integer? */
+      setivalue(&aux, k);
+      key = &aux;  /* insert it as an integer */
+    }
+    else if (unlikely(luai_numisnan(f)))
+      luaG_runerror(L, "table index is NaN");
+  }
+  mp = mainpositionTV(t, key);
+  if (!isempty(gval(mp)) || isdummy(t)) {  /* main position is taken? */
+    Node *othern;
+    Node *f = getfreepos(t);  /* get a free place */
+    if (f == NULL) {  /* cannot find a free place? */
+      rehash(L, t, key);  /* grow table */
+      /* whatever called 'newkey' takes care of TM cache */
+      return luaH_set(L, t, key);  /* insert key into grown table */
+    }
+    lua_assert(!isdummy(t));
+    othern = mainposition(t, keytt(mp), &keyval(mp));
+    if (othern != mp) {  /* is colliding node out of its main position? */
+      /* yes; move colliding node into free position */
+      while (othern + gnext(othern) != mp)  /* find previous */
+        othern += gnext(othern);
+      gnext(othern) = cast_int(f - othern);  /* rechain to point to 'f' */
+      *f = *mp;  /* copy colliding node into free pos. (mp->next also goes) */
+      if (gnext(mp) != 0) {
+        gnext(f) += cast_int(mp - f);  /* correct 'next' */
+        gnext(mp) = 0;  /* now 'mp' is free */
+      }
+      setempty(gval(mp));
+    }
+    else {  /* colliding node is in its own main position */
+      /* new node will go into free position */
+      if (gnext(mp) != 0)
+        gnext(f) = cast_int((mp + gnext(mp)) - f);  /* chain new position */
+      else lua_assert(gnext(f) == 0);
+      gnext(mp) = cast_int(f - mp);
+      mp = f;
+    }
+  }
+  setnodekey(L, mp, key);
+  luaC_barrierback(L, obj2gco(t), key);
+  lua_assert(isempty(gval(mp)));
+  return gval(mp);
+}
+```
+
+```cpp
+/*
+** main search function
+主要搜索函数
+*/
+const TValue *luaH_get (Table *t, const TValue *key) {
+  switch (ttypetag(key)) {
+    case LUA_TSHRSTR: return luaH_getshortstr(t, tsvalue(key));
+    case LUA_TNUMINT: return luaH_getint(t, ivalue(key));
+    case LUA_TNIL: return &absentkey;
+    case LUA_TNUMFLT: {
+      lua_Integer k;
+      if (luaV_flttointeger(fltvalue(key), &k, 0)) /* index is an integral? */
+        return luaH_getint(t, k);  /* use specialized version */
+      /* else... */
+    }  /* FALLTHROUGH */
+    default:
+      return getgeneric(t, key);
+  }
+}
+```
+
+```cpp
+/*
+** Try to find a boundary in table 't'. (A 'boundary' is an integer index
+** such that t[i] is present and t[i+1] is absent, or 0 if t[1] is absent
+** and 'maxinteger' if t[maxinteger] is present.)
+** (In the next explanation, we use Lua indices, that is, with base 1.
+** The code itself uses base 0 when indexing the array part of the table.)
+** The code starts with 'limit = t->alimit', a position in the array
+** part that may be a boundary.
+**
+** (1) If 't[limit]' is empty, there must be a boundary before it.
+** As a common case (e.g., after 't[#t]=nil'), check whether 'limit-1'
+** is present. If so, it is a boundary. Otherwise, do a binary search
+** between 0 and limit to find a boundary. In both cases, try to
+** use this boundary as the new 'alimit', as a hint for the next call.
+**
+** (2) If 't[limit]' is not empty and the array has more elements
+** after 'limit', try to find a boundary there. Again, try first
+** the special case (which should be quite frequent) where 'limit+1'
+** is empty, so that 'limit' is a boundary. Otherwise, check the
+** last element of the array part. If it is empty, there must be a
+** boundary between the old limit (present) and the last element
+** (absent), which is found with a binary search. (This boundary always
+** can be a new limit.)
+**
+** (3) The last case is when there are no elements in the array part
+** (limit == 0) or its last element (the new limit) is present.
+** In this case, must check the hash part. If there is no hash part
+** or 'limit+1' is absent, 'limit' is a boundary.  Otherwise, call
+** 'hash_search' to find a boundary in the hash part of the table.
+** (In those cases, the boundary is not inside the array part, and
+** therefore cannot be used as a new limit.)
+尝试找到表t的边界，分为三种情况。
+*/
+lua_Unsigned luaH_getn (Table *t) {
+  unsigned int limit = t->alimit;
+  if (limit > 0 && isempty(&t->array[limit - 1])) {  /* (1)? */
+    /* there must be a boundary before 'limit' */
+    if (limit >= 2 && !isempty(&t->array[limit - 2])) {
+      /* 'limit - 1' is a boundary; can it be a new limit? */
+      if (ispow2realasize(t) && !ispow2(limit - 1)) {
+        t->alimit = limit - 1;
+        setnorealasize(t);  /* now 'alimit' is not the real size */
+      }
+      return limit - 1;
+    }
+    else {  /* must search for a boundary in [0, limit] */
+      unsigned int boundary = binsearch(t->array, 0, limit);
+      /* can this boundary represent the real size of the array? */
+      if (ispow2realasize(t) && boundary > luaH_realasize(t) / 2) {
+        t->alimit = boundary;  /* use it as the new limit */
+        setnorealasize(t);
+      }
+      return boundary;
+    }
+  }
+  /* 'limit' is zero or present in table */
+  if (!limitequalsasize(t)) {  /* (2)? */
+    /* 'limit' > 0 and array has more elements after 'limit' */
+    if (isempty(&t->array[limit]))  /* 'limit + 1' is empty? */
+      return limit;  /* this is the boundary */
+    /* else, try last element in the array */
+    limit = luaH_realasize(t);
+    if (isempty(&t->array[limit - 1])) {  /* empty? */
+      /* there must be a boundary in the array after old limit,
+         and it must be a valid new limit */
+      unsigned int boundary = binsearch(t->array, t->alimit, limit);
+      t->alimit = boundary;
+      return boundary;
+    }
+    /* else, new limit is present in the table; check the hash part */
+  }
+  /* (3) 'limit' is the last element and either is zero or present in table */
+  lua_assert(limit == luaH_realasize(t) &&
+             (limit == 0 || !isempty(&t->array[limit - 1])));
+  if (isdummy(t) || isempty(luaH_getint(t, cast(lua_Integer, limit + 1))))
+    return limit;  /* 'limit + 1' is absent */
+  else  /* 'limit + 1' is also present */
+    return hash_search(t, limit);
+}
+```
+
 ### Lua 数学库
 
 以下为`lmathlib.c`
