@@ -3477,7 +3477,82 @@ lua_Unsigned luaH_getn (Table *t) {
 
 ### Lua 数学库
 
-以下为`lmathlib.c`
+以下为`lmathlib.c`,包括了基本的数学的运算和随机数库。
+
+```cpp
+static const luaL_Reg mathlib[] = {
+  {"abs",   math_abs},
+  {"acos",  math_acos},
+  {"asin",  math_asin},
+  {"atan",  math_atan},
+  {"ceil",  math_ceil},
+  {"cos",   math_cos},
+  {"deg",   math_deg},
+  {"exp",   math_exp},
+  {"tointeger", math_toint},
+  {"floor", math_floor},
+  {"fmod",   math_fmod},
+  {"ult",   math_ult},
+  {"log",   math_log},
+  {"max",   math_max},
+  {"min",   math_min},
+  {"modf",   math_modf},
+  {"rad",   math_rad},
+  {"sin",   math_sin},
+  {"sqrt",  math_sqrt},
+  {"tan",   math_tan},
+  {"type", math_type},
+#if defined(LUA_COMPAT_MATHLIB)
+  {"atan2", math_atan},
+  {"cosh",   math_cosh},
+  {"sinh",   math_sinh},
+  {"tanh",   math_tanh},
+  {"pow",   math_pow},
+  {"frexp", math_frexp},
+  {"ldexp", math_ldexp},
+  {"log10", math_log10},
+#endif
+  /* placeholders */
+  {"random", NULL},
+  {"randomseed", NULL},
+  {"pi", NULL},
+  {"huge", NULL},
+  {"maxinteger", NULL},
+  {"mininteger", NULL},
+  {NULL, NULL}
+};
+```
+
+Lua 数学函数示例
+
+```cpp
+/*
+** next function does not use 'modf', avoiding problems with 'double*'
+** (which is not compatible with 'float*') when lua_Number is not
+** 'double'.
+*/
+static int math_modf (lua_State *L) {
+  if (lua_isinteger(L ,1)) {
+    lua_settop(L, 1);  /* number is its own integer part */
+    lua_pushnumber(L, 0);  /* no fractional part */
+  }
+  else {
+    lua_Number n = luaL_checknumber(L, 1);
+    /* integer part (rounds toward zero) */
+    lua_Number ip = (n < 0) ? l_mathop(ceil)(n) : l_mathop(floor)(n);
+    pushnumint(L, ip);
+    /* fractional part (test needed for inf/-inf) */
+    lua_pushnumber(L, (n == ip) ? l_mathop(0.0) : (n - ip));
+  }
+  return 2;
+}
+
+
+static int math_sqrt (lua_State *L) {
+  lua_pushnumber(L, l_mathop(sqrt)(luaL_checknumber(L, 1)));
+  return 1;
+}
+```
 
 ### Lua 协程库
 
