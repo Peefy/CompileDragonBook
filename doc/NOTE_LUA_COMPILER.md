@@ -2638,7 +2638,99 @@ static const char *const opnames[] = {
 
 以下为`lfunc.c`和`lfunc.h`
 
+```cpp
+LUAI_FUNC Proto *luaF_newproto (lua_State *L);
+LUAI_FUNC CClosure *luaF_newCclosure (lua_State *L, int nelems);
+LUAI_FUNC LClosure *luaF_newLclosure (lua_State *L, int nelems);
+LUAI_FUNC void luaF_initupvals (lua_State *L, LClosure *cl);
+LUAI_FUNC UpVal *luaF_findupval (lua_State *L, StkId level);
+LUAI_FUNC void luaF_newtbcupval (lua_State *L, StkId level);
+LUAI_FUNC int luaF_close (lua_State *L, StkId level, int status);
+LUAI_FUNC void luaF_unlinkupval (UpVal *uv);
+LUAI_FUNC void luaF_freeproto (lua_State *L, Proto *f);
+LUAI_FUNC const char *luaF_getlocalname (const Proto *func, int local_number,
+                                         int pc);
+```
 
+Lua 原型和闭包部分函数实现
+
+```cpp
+CClosure *luaF_newCclosure (lua_State *L, int n) {
+  GCObject *o = luaC_newobj(L, LUA_TCCL, sizeCclosure(n));
+  CClosure *c = gco2ccl(o);
+  c->nupvalues = cast_byte(n);
+  return c;
+}
+
+
+LClosure *luaF_newLclosure (lua_State *L, int n) {
+  GCObject *o = luaC_newobj(L, LUA_TLCL, sizeLclosure(n));
+  LClosure *c = gco2lcl(o);
+  c->p = NULL;
+  c->nupvalues = cast_byte(n);
+  while (n--) c->upvals[n] = NULL;
+  return c;
+}
+
+int luaF_close (lua_State *L, StkId level, int status) {
+  UpVal *uv;
+  while ((uv = L->openupval) != NULL && uplevel(uv) >= level) {
+    TValue *slot = &uv->u.value;  /* new position for value */
+    lua_assert(uplevel(uv) < L->top);
+    if (uv->tbc && status != NOCLOSINGMETH) {
+      /* must run closing method, which may change the stack */
+      ptrdiff_t levelrel = savestack(L, level);
+      status = callclosemth(L, uplevel(uv), status);
+      level = restorestack(L, levelrel);
+    }
+    luaF_unlinkupval(uv);
+    setobj(L, slot, uv->v);  /* move value to upvalue slot */
+    uv->v = slot;  /* now current value lives here */
+    if (!iswhite(uv))
+      gray2black(uv);  /* closed upvalues cannot be gray */
+    luaC_barrier(L, uv, slot);
+  }
+  return status;
+}
+
+
+Proto *luaF_newproto (lua_State *L) {
+  GCObject *o = luaC_newobj(L, LUA_TPROTO, sizeof(Proto));
+  Proto *f = gco2p(o);
+  f->k = NULL;
+  f->sizek = 0;
+  f->p = NULL;
+  f->sizep = 0;
+  f->code = NULL;
+  f->sizecode = 0;
+  f->lineinfo = NULL;
+  f->sizelineinfo = 0;
+  f->abslineinfo = NULL;
+  f->sizeabslineinfo = 0;
+  f->upvalues = NULL;
+  f->sizeupvalues = 0;
+  f->numparams = 0;
+  f->is_vararg = 0;
+  f->maxstacksize = 0;
+  f->locvars = NULL;
+  f->sizelocvars = 0;
+  f->linedefined = 0;
+  f->lastlinedefined = 0;
+  f->source = NULL;
+  return f;
+}
+
+void luaF_freeproto (lua_State *L, Proto *f) {
+  luaM_freearray(L, f->code, f->sizecode);
+  luaM_freearray(L, f->p, f->sizep);
+  luaM_freearray(L, f->k, f->sizek);
+  luaM_freearray(L, f->lineinfo, f->sizelineinfo);
+  luaM_freearray(L, f->abslineinfo, f->sizeabslineinfo);
+  luaM_freearray(L, f->locvars, f->sizelocvars);
+  luaM_freearray(L, f->upvalues, f->sizeupvalues);
+  luaM_free(L, f);
+}
+```
 
 ## Lua 字符串
 
