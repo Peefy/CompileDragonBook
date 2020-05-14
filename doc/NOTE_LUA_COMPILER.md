@@ -1,7 +1,7 @@
 
 # Lua 编译器源码笔记
 
-主要包括了词法分析器，语法分析器，虚拟机(runtime，堆栈结构，操作码)，垃圾回收器，代码生成器以及Lua对象，Lua函数库，Lua调试等。
+主要包括了词法分析器，语法分析器，虚拟机(runtime，堆栈结构，操作码)，垃圾回收器，代码生成器以及Lua对象，Lua函数库，Lua调试器等。
 
 ## Lua 主函数和命令行程序
 
@@ -2638,6 +2638,8 @@ static const char *const opnames[] = {
 
 以下为`lfunc.c`和`lfunc.h`
 
+
+
 ## Lua 字符串
 
 以下为`lstring.c`和`lstring.h`
@@ -3619,9 +3621,309 @@ LUA_API lua_State *lua_newthread (lua_State *L) {
 
 以下为`loslib.c`
 
+```cpp
+static const luaL_Reg syslib[] = {
+  {"clock",     os_clock},
+  {"date",      os_date},
+  {"difftime",  os_difftime},
+  {"execute",   os_execute},
+  {"exit",      os_exit},
+  {"getenv",    os_getenv},
+  {"remove",    os_remove},
+  {"rename",    os_rename},
+  {"setlocale", os_setlocale},
+  {"time",      os_time},
+  {"tmpname",   os_tmpname},
+  {NULL, NULL}
+};
+```
+
+Lua os库示例
+
+```cpp
+static int os_time (lua_State *L) {
+  time_t t;
+  if (lua_isnoneornil(L, 1))  /* called without args? */
+    t = time(NULL);  /* get current time */
+  else {
+    struct tm ts;
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_settop(L, 1);  /* make sure table is at the top */
+    ts.tm_year = getfield(L, "year", -1, 1900);
+    ts.tm_mon = getfield(L, "month", -1, 1);
+    ts.tm_mday = getfield(L, "day", -1, 0);
+    ts.tm_hour = getfield(L, "hour", 12, 0);
+    ts.tm_min = getfield(L, "min", 0, 0);
+    ts.tm_sec = getfield(L, "sec", 0, 0);
+    ts.tm_isdst = getboolfield(L, "isdst");
+    t = mktime(&ts);
+    setallfields(L, &ts);  /* update fields with normalized values */
+  }
+  if (t != (time_t)(l_timet)t || t == (time_t)(-1))
+    return luaL_error(L,
+                  "time result cannot be represented in this installation");
+  l_pushtime(L, t);
+  return 1;
+}
+
+
+static int os_difftime (lua_State *L) {
+  time_t t1 = l_checktime(L, 1);
+  time_t t2 = l_checktime(L, 2);
+  lua_pushnumber(L, (lua_Number)difftime(t1, t2));
+  return 1;
+}
+
+/* }====================================================== */
+
+
+static int os_setlocale (lua_State *L) {
+  static const int cat[] = {LC_ALL, LC_COLLATE, LC_CTYPE, LC_MONETARY,
+                      LC_NUMERIC, LC_TIME};
+  static const char *const catnames[] = {"all", "collate", "ctype", "monetary",
+     "numeric", "time", NULL};
+  const char *l = luaL_optstring(L, 1, NULL);
+  int op = luaL_checkoption(L, 2, "all", catnames);
+  lua_pushstring(L, setlocale(cat[op], l));
+  return 1;
+}
+```
+
 ### 标准输入输出I/O库
 
 以下为`liolib.c`
+
+```cpp
+/*
+** functions for 'io' library
+*/
+static const luaL_Reg iolib[] = {
+  {"close", io_close},
+  {"flush", io_flush},
+  {"input", io_input},
+  {"lines", io_lines},
+  {"open", io_open},
+  {"output", io_output},
+  {"popen", io_popen},
+  {"read", io_read},
+  {"tmpfile", io_tmpfile},
+  {"type", io_type},
+  {"write", io_write},
+  {NULL, NULL}
+};
+
+
+/*
+** methods for file handles
+*/
+static const luaL_Reg meth[] = {
+  {"read", f_read},
+  {"write", f_write},
+  {"lines", f_lines},
+  {"flush", f_flush},
+  {"seek", f_seek},
+  {"close", f_close},
+  {"setvbuf", f_setvbuf},
+  {NULL, NULL}
+};
+```
+
+```cpp
+typedef struct luaL_Stream {
+  FILE *f;  /* stream (NULL for incompletely created streams) */
+  lua_CFunction closef;  /* to close stream (NULL for closed streams) */
+} luaL_Stream;
+```
+
+Lua io库函数示例
+
+```cpp
+static int io_type (lua_State *L) {
+  LStream *p;
+  luaL_checkany(L, 1);
+  p = (LStream *)luaL_testudata(L, 1, LUA_FILEHANDLE);
+  if (p == NULL)
+    luaL_pushfail(L);  /* not a file */
+  else if (isclosed(p))
+    lua_pushliteral(L, "closed file");
+  else
+    lua_pushliteral(L, "file");
+  return 1;
+}
+
+static int f_close (lua_State *L) {
+  tofile(L);  /* make sure argument is an open stream */
+  return aux_close(L);
+}
+
+
+static int io_close (lua_State *L) {
+  if (lua_isnone(L, 1))  /* no argument? */
+    lua_getfield(L, LUA_REGISTRYINDEX, IO_OUTPUT);  /* use standard output */
+  return f_close(L);
+}
+
+/*
+** function to close regular files
+*/
+static int io_fclose (lua_State *L) {
+  LStream *p = tolstream(L);
+  int res = fclose(p->f);
+  return luaL_fileresult(L, (res == 0), NULL);
+}
+
+static int io_open (lua_State *L) {
+  const char *filename = luaL_checkstring(L, 1);
+  const char *mode = luaL_optstring(L, 2, "r");
+  LStream *p = newfile(L);
+  const char *md = mode;  /* to traverse/check mode */
+  luaL_argcheck(L, l_checkmode(md), 2, "invalid mode");
+  p->f = fopen(filename, mode);
+  return (p->f == NULL) ? luaL_fileresult(L, 0, filename) : 1;
+}
+
+static int io_tmpfile (lua_State *L) {
+  LStream *p = newfile(L);
+  p->f = tmpfile();
+  return (p->f == NULL) ? luaL_fileresult(L, 0, NULL) : 1;
+}
+
+static int g_iofile (lua_State *L, const char *f, const char *mode) {
+  if (!lua_isnoneornil(L, 1)) {
+    const char *filename = lua_tostring(L, 1);
+    if (filename)
+      opencheck(L, filename, mode);
+    else {
+      tofile(L);  /* check that it's a valid file handle */
+      lua_pushvalue(L, 1);
+    }
+    lua_setfield(L, LUA_REGISTRYINDEX, f);
+  }
+  /* return current value */
+  lua_getfield(L, LUA_REGISTRYINDEX, f);
+  return 1;
+}
+
+
+static int io_input (lua_State *L) {
+  return g_iofile(L, IO_INPUT, "r");
+}
+
+
+static int io_output (lua_State *L) {
+  return g_iofile(L, IO_OUTPUT, "w");
+}
+
+/*
+** Return an iteration function for 'io.lines'. If file has to be
+** closed, also returns the file itself as a second result (to be
+** closed as the state at the exit of a generic for).
+返回“ io.lines”的迭代函数。 如果必须关闭文件，
+则还返回文件本身作为第二个结果（以作为通用出口的状态关闭）。
+*/
+static int io_lines (lua_State *L) {
+  int toclose;
+  if (lua_isnone(L, 1)) lua_pushnil(L);  /* at least one argument */
+  if (lua_isnil(L, 1)) {  /* no file name? */
+    lua_getfield(L, LUA_REGISTRYINDEX, IO_INPUT);  /* get default input */
+    lua_replace(L, 1);  /* put it at index 1 */
+    tofile(L);  /* check that it's a valid file handle */
+    toclose = 0;  /* do not close it after iteration */
+  }
+  else {  /* open a new file */
+    const char *filename = luaL_checkstring(L, 1);
+    opencheck(L, filename, "r");
+    lua_replace(L, 1);  /* put file at index 1 */
+    toclose = 1;  /* close it after iteration */
+  }
+  aux_lines(L, toclose);  /* push iteration function */
+  if (toclose) {
+    lua_pushnil(L);  /* state */
+    lua_pushnil(L);  /* control */
+    lua_pushvalue(L, 1);  /* file is the to-be-closed variable (4th result) */
+    return 4;
+  }
+  else
+    return 1;
+}
+
+static int read_line (lua_State *L, FILE *f, int chop) {
+  luaL_Buffer b;
+  int c;
+  luaL_buffinit(L, &b);
+  do {  /* may need to read several chunks to get whole line */
+    char *buff = luaL_prepbuffer(&b);  /* preallocate buffer space */
+    int i = 0;
+    l_lockfile(f);  /* no memory errors can happen inside the lock */
+    while (i < LUAL_BUFFERSIZE && (c = l_getc(f)) != EOF && c != '\n')
+      buff[i++] = c;  /* read up to end of line or buffer limit */
+    l_unlockfile(f);
+    luaL_addsize(&b, i);
+  } while (c != EOF && c != '\n');  /* repeat until end of line */
+  if (!chop && c == '\n')  /* want a newline and have one? */
+    luaL_addchar(&b, c);  /* add ending newline to result */
+  luaL_pushresult(&b);  /* close buffer */
+  /* return ok if read something (either a newline or something else) */
+  return (c == '\n' || lua_rawlen(L, -1) > 0);
+}
+
+
+static void read_all (lua_State *L, FILE *f) {
+  size_t nr;
+  luaL_Buffer b;
+  luaL_buffinit(L, &b);
+  do {  /* read file in chunks of LUAL_BUFFERSIZE bytes */
+    char *p = luaL_prepbuffer(&b);
+    nr = fread(p, sizeof(char), LUAL_BUFFERSIZE, f);
+    luaL_addsize(&b, nr);
+  } while (nr == LUAL_BUFFERSIZE);
+  luaL_pushresult(&b);  /* close buffer */
+}
+
+
+static int read_chars (lua_State *L, FILE *f, size_t n) {
+  size_t nr;  /* number of chars actually read */
+  char *p;
+  luaL_Buffer b;
+  luaL_buffinit(L, &b);
+  p = luaL_prepbuffsize(&b, n);  /* prepare buffer to read whole block */
+  nr = fread(p, sizeof(char), n, f);  /* try to read 'n' chars */
+  luaL_addsize(&b, nr);
+  luaL_pushresult(&b);  /* close buffer */
+  return (nr > 0);  /* true iff read something */
+}
+
+/*
+** Iteration function for 'lines'.
+*/
+static int io_readline (lua_State *L) {
+  LStream *p = (LStream *)lua_touserdata(L, lua_upvalueindex(1));
+  int i;
+  int n = (int)lua_tointeger(L, lua_upvalueindex(2));
+  if (isclosed(p))  /* file is already closed? */
+    return luaL_error(L, "file is already closed");
+  lua_settop(L , 1);
+  luaL_checkstack(L, n, "too many arguments");
+  for (i = 1; i <= n; i++)  /* push arguments to 'g_read' */
+    lua_pushvalue(L, lua_upvalueindex(3 + i));
+  n = g_read(L, p->f, 2);  /* 'n' is number of results */
+  lua_assert(n > 0);  /* should return at least a nil */
+  if (lua_toboolean(L, -n))  /* read at least one value? */
+    return n;  /* return them */
+  else {  /* first result is false: EOF or error */
+    if (n > 1) {  /* is there error information? */
+      /* 2nd result is error message */
+      return luaL_error(L, "%s", lua_tostring(L, -n + 1));
+    }
+    if (lua_toboolean(L, lua_upvalueindex(3))) {  /* generator created file? */
+      lua_settop(L, 0);  /* clear stack */
+      lua_pushvalue(L, lua_upvalueindex(1));  /* push file at index 1 */
+      aux_close(L);  /* close it */
+    }
+    return 0;
+  }
+}
+```
 
 ### Lua utf8库
 
