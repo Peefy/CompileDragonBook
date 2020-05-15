@@ -2543,6 +2543,312 @@ union GCUnion {
 
 以下为`ldo.c`和`ldo.h`
 
+Lua 堆栈结构API函数
+
+```cpp
+LUAI_FUNC void luaD_seterrorobj (lua_State *L, int errcode, StkId oldtop);
+LUAI_FUNC int luaD_protectedparser (lua_State *L, ZIO *z, const char *name,
+                                                  const char *mode);
+LUAI_FUNC void luaD_hook (lua_State *L, int event, int line,
+                                        int fTransfer, int nTransfer);
+LUAI_FUNC void luaD_hookcall (lua_State *L, CallInfo *ci);
+LUAI_FUNC void luaD_pretailcall (lua_State *L, CallInfo *ci, StkId func, int n);
+LUAI_FUNC void luaD_call (lua_State *L, StkId func, int nResults);
+LUAI_FUNC void luaD_callnoyield (lua_State *L, StkId func, int nResults);
+LUAI_FUNC void luaD_tryfuncTM (lua_State *L, StkId func);
+LUAI_FUNC int luaD_pcall (lua_State *L, Pfunc func, void *u,
+                                        ptrdiff_t oldtop, ptrdiff_t ef);
+LUAI_FUNC void luaD_poscall (lua_State *L, CallInfo *ci, int nres);
+LUAI_FUNC int luaD_reallocstack (lua_State *L, int newsize, int raiseerror);
+LUAI_FUNC int luaD_growstack (lua_State *L, int n, int raiseerror);
+LUAI_FUNC void luaD_shrinkstack (lua_State *L);
+LUAI_FUNC void luaD_inctop (lua_State *L);
+
+LUAI_FUNC l_noret luaD_throw (lua_State *L, int errcode);
+LUAI_FUNC int luaD_rawrunprotected (lua_State *L, Pfunc f, void *ud);
+```
+
+```cpp
+/* chain list of long jump buffers
+长跳转缓冲器链表 */
+struct lua_longjmp {
+  struct lua_longjmp *previous;
+  luai_jmpbuf b;
+  volatile int status;  /* error code 错误码 */
+};
+```
+
+```cpp
+void luaD_seterrorobj (lua_State *L, int errcode, StkId oldtop) {
+  switch (errcode) {
+    case LUA_ERRMEM: {  /* memory error? 内存错误？*/
+      setsvalue2s(L, oldtop, G(L)->memerrmsg); /* reuse preregistered msg. 重用预注册信息。 */
+      break;
+    }
+    case LUA_ERRERR: {
+      setsvalue2s(L, oldtop, luaS_newliteral(L, "error in error handling"));
+      break;
+    }
+    case CLOSEPROTECT: {
+      setnilvalue(s2v(oldtop));  /* no error message 没有错误讯息 */
+      break;
+    }
+    default: {
+      setobjs2s(L, oldtop, L->top - 1);  /* error message on current top 当前顶部的错误消息 */
+      break;
+    }
+  }
+  L->top = oldtop + 1;
+}
+```
+
+Lua 堆栈和调用结构示例
+
+```cpp
+void luaD_seterrorobj (lua_State *L, int errcode, StkId oldtop) {
+  switch (errcode) {
+    case LUA_ERRMEM: {  /* memory error? 内存错误？*/
+      setsvalue2s(L, oldtop, G(L)->memerrmsg); /* reuse preregistered msg. 重用预注册信息。 */
+      break;
+    }
+    case LUA_ERRERR: {
+      setsvalue2s(L, oldtop, luaS_newliteral(L, "error in error handling"));
+      break;
+    }
+    case CLOSEPROTECT: {
+      setnilvalue(s2v(oldtop));  /* no error message 没有错误讯息 */
+      break;
+    }
+    default: {
+      setobjs2s(L, oldtop, L->top - 1);  /* error message on current top 当前顶部的错误消息 */
+      break;
+    }
+  }
+  L->top = oldtop + 1;
+}
+```
+
+```cpp
+/*
+** {==================================================================
+** Stack reallocation 堆栈重新分配
+** ===================================================================
+*/
+static void correctstack (lua_State *L, StkId oldstack, StkId newstack) {
+  CallInfo *ci;
+  UpVal *up;
+  if (oldstack == newstack)
+    return;  /* stack address did not change */
+  L->top = (L->top - oldstack) + newstack;
+  for (up = L->openupval; up != NULL; up = up->u.open.next)
+    up->v = s2v((uplevel(up) - oldstack) + newstack);
+  for (ci = L->ci; ci != NULL; ci = ci->previous) {
+    ci->top = (ci->top - oldstack) + newstack;
+    ci->func = (ci->func - oldstack) + newstack;
+    if (isLua(ci))
+      ci->u.l.trap = 1;  /* signal to update 'trap' in 'luaV_execute' */
+  }
+}
+
+/* some space for error handling */
+#define ERRORSTACKSIZE	(LUAI_MAXSTACK + 200)
+
+int luaD_reallocstack (lua_State *L, int newsize, int raiseerror) {
+  int lim = L->stacksize;
+  StkId newstack = luaM_reallocvector(L, L->stack, lim, newsize, StackValue);
+  lua_assert(newsize <= LUAI_MAXSTACK || newsize == ERRORSTACKSIZE);
+  lua_assert(L->stack_last - L->stack == L->stacksize - EXTRA_STACK);
+  if (unlikely(newstack == NULL)) {  /* reallocation failed? */
+    if (raiseerror)
+      luaM_error(L);
+    else return 0;  /* do not raise an error */
+  }
+  for (; lim < newsize; lim++)
+    setnilvalue(s2v(newstack + lim)); /* erase new segment */
+  correctstack(L, L->stack, newstack);
+  L->stack = newstack;
+  L->stacksize = newsize;
+  L->stack_last = L->stack + newsize - EXTRA_STACK;
+  return 1;
+}
+```
+
+```cpp
+/* 收缩堆栈 */
+void luaD_shrinkstack (lua_State *L) {
+  int inuse = stackinuse(L);
+  int goodsize = inuse + (inuse / 8) + 2*EXTRA_STACK;
+  if (goodsize > LUAI_MAXSTACK)
+    goodsize = LUAI_MAXSTACK;  /* respect stack limit */
+  /* if thread is currently not handling a stack overflow and its
+     good size is smaller than current size, shrink its stack 
+     如果线程当前未处理堆栈溢出，并且其正常大小小于当前大小，则缩小其堆栈 */
+  if (inuse <= (LUAI_MAXSTACK - EXTRA_STACK) &&
+      goodsize < L->stacksize)
+    luaD_reallocstack(L, goodsize, 0);  /* ok if that fails */
+  else  /* don't change stack */
+    condmovestack(L,{},{});  /* (change only for debugging) */
+  luaE_shrinkCI(L);  /* shrink CI list */
+}
+```
+
+```cpp
+/*
+** Call a hook for the given event. Make sure there is a hook to be
+** called. (Both 'L->hook' and 'L->hookmask', which trigger this
+** function, can be changed asynchronously by signals.)
+调用给定事件的钩子。 确保有一个挂钩被调用。
+（触发该功能的'L-> hook'和'L-> hookmask'均可通过信号异步更改。）
+*/
+void luaD_hook (lua_State *L, int event, int line,
+                              int ftransfer, int ntransfer) {
+  lua_Hook hook = L->hook;
+  if (hook && L->allowhook) {  /* make sure there is a hook 确定存在一个钩子 */
+    int mask = CIST_HOOKED;
+    CallInfo *ci = L->ci;
+    ptrdiff_t top = savestack(L, L->top);
+    ptrdiff_t ci_top = savestack(L, ci->top);
+    lua_Debug ar;
+    ar.event = event;
+    ar.currentline = line;
+    ar.i_ci = ci;
+    if (ntransfer != 0) {
+      mask |= CIST_TRAN;  /* 'ci' has transfer information */
+      ci->u2.transferinfo.ftransfer = ftransfer;
+      ci->u2.transferinfo.ntransfer = ntransfer;
+    }
+    luaD_checkstack(L, LUA_MINSTACK);  /* ensure minimum stack size 保证最小的堆栈大小 */
+    if (L->top + LUA_MINSTACK > ci->top)
+      ci->top = L->top + LUA_MINSTACK;
+    L->allowhook = 0;  /* cannot call hooks inside a hook 不能在钩子中调用钩子 */
+    ci->callstatus |= mask;
+    lua_unlock(L);
+    (*hook)(L, &ar);
+    lua_lock(L);
+    lua_assert(!L->allowhook);
+    L->allowhook = 1;
+    ci->top = restorestack(L, ci_top);
+    L->top = restorestack(L, top);
+    ci->callstatus &= ~mask;
+  }
+}
+
+/*
+** Executes a call hook for Lua functions. This function is called
+** whenever 'hookmask' is not zero, so it checks whether call hooks are
+** active.
+执行Lua函数的调用钩子。每当“hookmask”不为零时都会调用此函数，因此它将检查调用挂钩是否处于活动状态。
+*/
+void luaD_hookcall (lua_State *L, CallInfo *ci) {
+  int hook = (ci->callstatus & CIST_TAIL) ? LUA_HOOKTAILCALL : LUA_HOOKCALL;
+  Proto *p;
+  if (!(L->hookmask & LUA_MASKCALL))  /* some other hook? */
+    return;  /* don't call hook */
+  p = clLvalue(s2v(ci->func))->p;
+  L->top = ci->top;  /* prepare top */
+  ci->u.l.savedpc++;  /* hooks assume 'pc' is already incremented 
+  钩子假设'pc'已经增加 */
+  luaD_hook(L, hook, -1, 1, p->numparams);
+  ci->u.l.savedpc--;  /* correct 'pc' */
+}
+```
+
+```cpp
+/*
+** Call a function (C or Lua). The function to be called is at *func.
+** The arguments are on the stack, right after the function.
+** When returns, all the results are on the stack, starting at the original
+** function position.
+**调用函数（C或Lua）。 要调用的函数在* func处。
+**参数位于函数之后的堆栈中。
+**返回时，所有结果都将从原始函数位置开始存储在堆栈中。
+*/
+void luaD_call (lua_State *L, StkId func, int nresults) {
+  lua_CFunction f;
+ retry:
+  switch (ttypetag(s2v(func))) {
+    case LUA_TCCL:  /* C closure */
+      f = clCvalue(s2v(func))->f;
+      goto Cfunc;
+    case LUA_TLCF:  /* light C function */
+      f = fvalue(s2v(func));
+     Cfunc: {
+      int n;  /* number of returns */
+      CallInfo *ci;
+      checkstackp(L, LUA_MINSTACK, func);  /* ensure minimum stack size */
+      ci = next_ci(L);
+      ci->nresults = nresults;
+      ci->callstatus = CIST_C;
+      ci->top = L->top + LUA_MINSTACK;
+      ci->func = func;
+      lua_assert(ci->top <= L->stack_last);
+      if (L->hookmask & LUA_MASKCALL) {
+        int narg = cast_int(L->top - func) - 1;
+        luaD_hook(L, LUA_HOOKCALL, -1, 1, narg);
+      }
+      lua_unlock(L);
+      n = (*f)(L);  /* do the actual call */
+      lua_lock(L);
+      api_checknelems(L, n);
+      luaD_poscall(L, ci, n);
+      break;
+    }
+    case LUA_TLCL: {  /* Lua function */
+      CallInfo *ci;
+      Proto *p = clLvalue(s2v(func))->p;
+      int narg = cast_int(L->top - func) - 1;  /* number of real arguments */
+      int nfixparams = p->numparams;
+      int fsize = p->maxstacksize;  /* frame size */
+      checkstackp(L, fsize, func);
+      ci = next_ci(L);
+      ci->nresults = nresults;
+      ci->u.l.savedpc = p->code;  /* starting point */
+      ci->callstatus = 0;
+      ci->top = func + 1 + fsize;
+      ci->func = func;
+      for (; narg < nfixparams; narg++)
+        setnilvalue(s2v(L->top++));  /* complete missing arguments */
+      lua_assert(ci->top <= L->stack_last);
+      luaV_execute(L, ci);  /* run the function */
+      break;
+    }
+    default: {  /* not a function */
+      checkstackp(L, 1, func);  /* space for metamethod */
+      luaD_tryfuncTM(L, func);  /* try to get '__call' metamethod */
+      goto retry;  /* try again with metamethod */
+    }
+  }
+}
+
+/*
+** Call the C function 'func' in protected mode, restoring basic
+** thread information ('allowhook', etc.) and in particular
+** its stack level in case of errors.
+在保护模式下调用C函数“ func”，以恢复基本线程信息（“ allowhook”等），
+尤其是在发生错误时恢复其堆栈级别。
+*/
+int luaD_pcall (lua_State *L, Pfunc func, void *u,
+                ptrdiff_t old_top, ptrdiff_t ef) {
+  int status;
+  CallInfo *old_ci = L->ci;
+  lu_byte old_allowhooks = L->allowhook;
+  ptrdiff_t old_errfunc = L->errfunc;
+  L->errfunc = ef;
+  status = luaD_rawrunprotected(L, func, u);
+  if (unlikely(status != LUA_OK)) {  /* an error occurred? */
+    StkId oldtop = restorestack(L, old_top);
+    L->ci = old_ci;
+    L->allowhook = old_allowhooks;
+    status = luaF_close(L, oldtop, status);
+    oldtop = restorestack(L, old_top);  /* previous call may change stack */
+    luaD_seterrorobj(L, status, oldtop);
+    luaD_shrinkstack(L);
+  }
+  L->errfunc = old_errfunc;
+  return status;
+}
+```
+
 ### Lua 虚拟机的操作码
 
 以下为`lopnames.h`,`lopcodes.c`和`lopcodes.h`
