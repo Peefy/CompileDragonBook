@@ -5660,4 +5660,111 @@ LUAI_DDEC(const lu_byte luai_ctype_[UCHAR_MAX + 2];)
 
 以下为`ldblib.c`, `ldebug.c`和`ldebug.h`
 
-<!--TODO-->
+```cpp
+struct lua_Debug {
+  int event;
+  const char *name;	/* (n) */
+  const char *namewhat;	/* (n) 'global', 'local', 'field', 'method' */
+  const char *what;	/* (S) 'Lua', 'C', 'main', 'tail' */
+  const char *source;	/* (S) */
+  size_t srclen;	/* (S) */
+  int currentline;	/* (l) */
+  int linedefined;	/* (S) */
+  int lastlinedefined;	/* (S) */
+  unsigned char nups;	/* (u) number of upvalues */
+  unsigned char nparams;/* (u) number of parameters */
+  char isvararg;        /* (u) */
+  char istailcall;	/* (t) */
+  unsigned short ftransfer;   /* (r) index of first value transferred */
+  unsigned short ntransfer;   /* (r) number of transferred values */
+  char short_src[LUA_IDSIZE]; /* (S) */
+  /* private part */
+  struct CallInfo *i_ci;  /* active function */
+};
+```
+
+```cpp
+#define ABSLINEINFO	(-0x80)
+
+LUAI_FUNC int luaG_getfuncline (const Proto *f, int pc);
+LUAI_FUNC const char *luaG_findlocal (lua_State *L, CallInfo *ci, int n,
+                                                    StkId *pos);
+LUAI_FUNC l_noret luaG_typeerror (lua_State *L, const TValue *o,
+                                                const char *opname);
+LUAI_FUNC l_noret luaG_forerror (lua_State *L, const TValue *o,
+                                               const char *what);
+LUAI_FUNC l_noret luaG_concaterror (lua_State *L, const TValue *p1,
+                                                  const TValue *p2);
+LUAI_FUNC l_noret luaG_opinterror (lua_State *L, const TValue *p1,
+                                                 const TValue *p2,
+                                                 const char *msg);
+LUAI_FUNC l_noret luaG_tointerror (lua_State *L, const TValue *p1,
+                                                 const TValue *p2);
+LUAI_FUNC l_noret luaG_ordererror (lua_State *L, const TValue *p1,
+                                                 const TValue *p2);
+LUAI_FUNC l_noret luaG_runerror (lua_State *L, const char *fmt, ...);
+LUAI_FUNC const char *luaG_addinfo (lua_State *L, const char *msg,
+                                                  TString *src, int line);
+LUAI_FUNC l_noret luaG_errormsg (lua_State *L);
+LUAI_FUNC int luaG_traceexec (lua_State *L, const Instruction *pc);
+```
+
+```cpp
+/*
+** Get the line corresponding to instruction 'pc' in function 'f';
+** first gets a base line and from there does the increments until
+** the desired instruction.
+在函数“f”中获取与指令“pc”相对应的行； 首先获取基线，然后从那里开始递增，直到所需的指令为止。
+*/
+int luaG_getfuncline (const Proto *f, int pc) {
+  if (f->lineinfo == NULL)  /* no debug information? */
+    return -1;
+  else {
+    int basepc;
+    int baseline = getbaseline(f, pc, &basepc);
+    while (basepc++ < pc) {  /* walk until given instruction */
+      lua_assert(f->lineinfo[basepc] != ABSLINEINFO);
+      baseline += f->lineinfo[basepc];  /* correct line */
+    }
+    return baseline;
+  }
+}
+
+const char *luaG_findlocal (lua_State *L, CallInfo *ci, int n, StkId *pos) {
+  StkId base = ci->func + 1;
+  const char *name = NULL;
+  if (isLua(ci)) {
+    if (n < 0)  /* access to vararg values? */
+      return findvararg(ci, -n, pos);
+    else
+      name = luaF_getlocalname(ci_func(ci)->p, n, currentpc(ci));
+  }
+  if (name == NULL) {  /* no 'standard' name? */
+    StkId limit = (ci == L->ci) ? L->top : ci->next->func;
+    if (limit - base >= n && n > 0) {  /* is 'n' inside 'ci' stack? */
+      /* generic name for any valid slot */
+      name = isLua(ci) ? "(temporary)" : "(C temporary)";
+    }
+    else
+      return NULL;  /* no name */
+  }
+  if (pos)
+    *pos = base + (n - 1);
+  return name;
+}
+```
+
+```cpp
+l_noret luaG_runerror (lua_State *L, const char *fmt, ...) {
+  CallInfo *ci = L->ci;
+  const char *msg;
+  va_list argp;
+  luaC_checkGC(L);  /* error message uses memory */
+  va_start(argp, fmt);
+  msg = luaO_pushvfstring(L, fmt, argp);  /* format message */
+  va_end(argp);
+  if (isLua(ci))  /* if Lua function, add source:line information */
+    luaG_addinfo(L, msg, ci_func(ci)->p->source, currentline(ci));
+  luaG_errormsg(L);
+}
+```
