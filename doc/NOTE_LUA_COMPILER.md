@@ -1686,6 +1686,8 @@ int luaX_lookahead (LexState *ls) {
 
 可以延迟变量和表达式的代码生成，以允许优化；`expdesc`结构描述了可能延迟的变量/表达式。它具有其“主要”值的说明以及也可以产生其值的条件跳转列表（生成的由短路运算符`and`/`or`表示。
 
+<!--TODO-->
+
 ## Lua 预编译
 
 以下为`lundump.c`和`lundump.h`
@@ -1756,8 +1758,6 @@ int luaU_dump(lua_State *L, const Proto *f, lua_Writer w, void *data,
   return D.status;
 }
 ```
-
-### 保存预编译的Lua块
 
 ## Lua 缓冲流
 
@@ -2442,14 +2442,6 @@ const char *luaO_pushvfstring (lua_State *L, const char *fmt, va_list argp) {
 }
 ```
 
-## Lua Table (hash)
-
-以下为`ltable.c`和`ltable.h`
-
-## Lua 字符串和模式匹配
-
-以下为`lstring.c`和`lstring.h`
-
 ## Lua API
 
 以下为`lapi.c`和`lapi.h`
@@ -2534,6 +2526,8 @@ union GCUnion {
   struct UpVal upv;
 };
 ```
+
+<!--TODO-->
 
 ## Lua 虚拟机
 
@@ -3990,15 +3984,234 @@ Udata *luaS_newudata (lua_State *L, size_t s, int nuvalue) {
 }
 ```
 
+## Lua 标记方法
+
+以下为`ltm.c`和`ltm.h`
+
+```cpp
+typedef enum {
+  TM_INDEX,
+  TM_NEWINDEX,
+  TM_GC,
+  TM_MODE,
+  TM_LEN,
+  TM_EQ,  /* last tag method with fast access */
+  TM_ADD,
+  TM_SUB,
+  TM_MUL,
+  TM_MOD,
+  TM_POW,
+  TM_DIV,
+  TM_IDIV,
+  TM_BAND,
+  TM_BOR,
+  TM_BXOR,
+  TM_SHL,
+  TM_SHR,
+  TM_UNM,
+  TM_BNOT,
+  TM_LT,
+  TM_LE,
+  TM_CONCAT,
+  TM_CALL,
+  TM_CLOSE,
+  TM_N		/* number of elements in the enum */
+} TMS;
+```
+
+```cpp
+LUAI_FUNC const char *luaT_objtypename (lua_State *L, const TValue *o);
+
+LUAI_FUNC const TValue *luaT_gettm (Table *events, TMS event, TString *ename);
+LUAI_FUNC const TValue *luaT_gettmbyobj (lua_State *L, const TValue *o,
+                                                       TMS event);
+LUAI_FUNC void luaT_init (lua_State *L);
+
+LUAI_FUNC void luaT_callTM (lua_State *L, const TValue *f, const TValue *p1,
+                            const TValue *p2, const TValue *p3);
+LUAI_FUNC void luaT_callTMres (lua_State *L, const TValue *f,
+                            const TValue *p1, const TValue *p2, StkId p3);
+LUAI_FUNC void luaT_trybinTM (lua_State *L, const TValue *p1, const TValue *p2,
+                              StkId res, TMS event);
+LUAI_FUNC void luaT_tryconcatTM (lua_State *L);
+LUAI_FUNC void luaT_trybinassocTM (lua_State *L, const TValue *p1,
+       const TValue *p2, int inv, StkId res, TMS event);
+LUAI_FUNC void luaT_trybiniTM (lua_State *L, const TValue *p1, lua_Integer i2,
+                               int inv, StkId res, TMS event);
+LUAI_FUNC int luaT_callorderTM (lua_State *L, const TValue *p1,
+                                const TValue *p2, TMS event);
+LUAI_FUNC int luaT_callorderiTM (lua_State *L, const TValue *p1, int v2,
+                                 int inv, int isfloat, TMS event);
+
+LUAI_FUNC void luaT_adjustvarargs (lua_State *L, int nfixparams,
+                                   struct CallInfo *ci, const Proto *p);
+LUAI_FUNC void luaT_getvarargs (lua_State *L, struct CallInfo *ci,
+                                              StkId where, int wanted);
+```
+
+```cpp
+void luaT_init (lua_State *L) {
+  static const char *const luaT_eventname[] = {  /* ORDER TM */
+    "__index", "__newindex",
+    "__gc", "__mode", "__len", "__eq",
+    "__add", "__sub", "__mul", "__mod", "__pow",
+    "__div", "__idiv",
+    "__band", "__bor", "__bxor", "__shl", "__shr",
+    "__unm", "__bnot", "__lt", "__le",
+    "__concat", "__call", "__close"
+  };
+  int i;
+  for (i=0; i<TM_N; i++) {
+    G(L)->tmname[i] = luaS_new(L, luaT_eventname[i]);
+    luaC_fix(L, obj2gco(G(L)->tmname[i]));  /* never collect these names */
+  }
+}
+```
+
+```cpp
+/*
+** function to be used with macro "fasttm": optimized for absence of
+** tag methods
+与宏 “fasttm” 一起使用的函数：针对缺少标签方法进行了优化
+*/
+const TValue *luaT_gettm (Table *events, TMS event, TString *ename) {
+  const TValue *tm = luaH_getshortstr(events, ename);
+  lua_assert(event <= TM_EQ);
+  if (notm(tm)) {  /* no tag method? */
+    events->flags |= cast_byte(1u<<event);  /* cache this fact */
+    return NULL;
+  }
+  else return tm;
+}
+```
+
 ## Lua 函数库
 
 ### Lua 基本函数和基础库
 
 以下为`lbaselib`和`lualib.h`
 
-### Lua 时间库
+定义了Lua基本函数，如`print`等
 
-以下为`ltm.c`和`ltm.h`
+```cpp
+static const luaL_Reg base_funcs[] = {
+  {"assert", luaB_assert},
+  {"collectgarbage", luaB_collectgarbage},
+  {"dofile", luaB_dofile},
+  {"error", luaB_error},
+  {"getmetatable", luaB_getmetatable},
+  {"ipairs", luaB_ipairs},
+  {"loadfile", luaB_loadfile},
+  {"load", luaB_load},
+  {"next", luaB_next},
+  {"pairs", luaB_pairs},
+  {"pcall", luaB_pcall},
+  {"print", luaB_print},
+  {"warn", luaB_warn},
+  {"rawequal", luaB_rawequal},
+  {"rawlen", luaB_rawlen},
+  {"rawget", luaB_rawget},
+  {"rawset", luaB_rawset},
+  {"select", luaB_select},
+  {"setmetatable", luaB_setmetatable},
+  {"tonumber", luaB_tonumber},
+  {"tostring", luaB_tostring},
+  {"type", luaB_type},
+  {"xpcall", luaB_xpcall},
+  /* placeholders */
+  {LUA_GNAME, NULL},
+  {"_VERSION", NULL},
+  {NULL, NULL}
+};
+```
+
+```cpp
+static int luaB_print (lua_State *L) {
+  int n = lua_gettop(L);  /* number of arguments */
+  int i;
+  for (i = 1; i <= n; i++) {  /* for each argument */
+    size_t l;
+    const char *s = luaL_tolstring(L, i, &l);  /* convert it to string */
+    if (i > 1)  /* not the first element? */
+      lua_writestring("\t", 1);  /* add a tab before it */
+    lua_writestring(s, l);  /* print it */
+    lua_pop(L, 1);  /* pop result */
+  }
+  lua_writeline();
+  return 0;
+}
+```
+
+```cpp
+static int luaB_tonumber (lua_State *L) {
+  if (lua_isnoneornil(L, 2)) {  /* standard conversion? */
+    if (lua_type(L, 1) == LUA_TNUMBER) {  /* already a number? */
+      lua_settop(L, 1);  /* yes; return it */
+      return 1;
+    }
+    else {
+      size_t l;
+      const char *s = lua_tolstring(L, 1, &l);
+      if (s != NULL && lua_stringtonumber(L, s) == l + 1)
+        return 1;  /* successful conversion to number */
+      /* else not a number */
+      luaL_checkany(L, 1);  /* (but there must be some parameter) */
+    }
+  }
+  else {
+    size_t l;
+    const char *s;
+    lua_Integer n = 0;  /* to avoid warnings */
+    lua_Integer base = luaL_checkinteger(L, 2);
+    luaL_checktype(L, 1, LUA_TSTRING);  /* no numbers as strings */
+    s = lua_tolstring(L, 1, &l);
+    luaL_argcheck(L, 2 <= base && base <= 36, 2, "base out of range");
+    if (b_str2int(s, (int)base, &n) == s + l) {
+      lua_pushinteger(L, n);
+      return 1;
+    }  /* else not a number */
+  }  /* else not a number */
+  luaL_pushfail(L);  /* not a number */
+  return 1;
+}
+
+static int luaB_tostring (lua_State *L) {
+  luaL_checkany(L, 1);
+  luaL_tolstring(L, 1, NULL);
+  return 1;
+}
+
+static int luaB_type (lua_State *L) {
+  int t = lua_type(L, 1);
+  luaL_argcheck(L, t != LUA_TNONE, 1, "value expected");
+  lua_pushstring(L, lua_typename(L, t));
+  return 1;
+}
+```
+
+```cpp
+static int luaB_getmetatable (lua_State *L) {
+  luaL_checkany(L, 1);
+  if (!lua_getmetatable(L, 1)) {
+    lua_pushnil(L);
+    return 1;  /* no metatable */
+  }
+  luaL_getmetafield(L, 1, "__metatable");
+  return 1;  /* returns either __metatable field (if present) or metatable */
+}
+
+
+static int luaB_setmetatable (lua_State *L) {
+  int t = lua_type(L, 2);
+  luaL_checktype(L, 1, LUA_TTABLE);
+  luaL_argexpected(L, t == LUA_TNIL || t == LUA_TTABLE, 2, "nil or table");
+  if (luaL_getmetafield(L, 1, "__metatable") != LUA_TNIL)
+    return luaL_error(L, "cannot change a protected metatable");
+  lua_settop(L, 2);
+  lua_setmetatable(L, 1);
+  return 1;
+}
+```
 
 ### Lua string库
 
@@ -5085,6 +5298,112 @@ static int io_readline (lua_State *L) {
 
 以下为`lutf8lib.c`
 
+```cpp
+static const luaL_Reg funcs[] = {
+  {"offset", byteoffset},
+  {"codepoint", codepoint},
+  {"char", utfchar},
+  {"len", utflen},
+  {"codes", iter_codes},
+  /* placeholders */
+  {"charpattern", NULL},
+  {NULL, NULL}
+};
+```
+
+```cpp
+/* pattern to match a single UTF-8 character */
+#define UTF8PATT	"[\0-\x7F\xC2-\xFD][\x80-\xBF]*"
+```
+
+```cpp
+/*
+** Decode one UTF-8 sequence, returning NULL if byte sequence is
+** invalid.  The array 'limits' stores the minimum value for each
+** sequence length, to check for overlong representations. Its first
+** entry forces an error for non-ascii bytes with no continuation
+** bytes (count == 0).
+*/
+static const char *utf8_decode (const char *s, utfint *val, int strict) {
+  static const utfint limits[] =
+        {~(utfint)0, 0x80, 0x800, 0x10000u, 0x200000u, 0x4000000u};
+  unsigned int c = (unsigned char)s[0];
+  utfint res = 0;  /* final result */
+  if (c < 0x80)  /* ascii? */
+    res = c;
+  else {
+    int count = 0;  /* to count number of continuation bytes */
+    for (; c & 0x40; c <<= 1) {  /* while it needs continuation bytes... */
+      unsigned int cc = (unsigned char)s[++count];  /* read next byte */
+      if ((cc & 0xC0) != 0x80)  /* not a continuation byte? */
+        return NULL;  /* invalid byte sequence */
+      res = (res << 6) | (cc & 0x3F);  /* add lower 6 bits from cont. byte */
+    }
+    res |= ((utfint)(c & 0x7F) << (count * 5));  /* add first byte */
+    if (count > 5 || res > MAXUTF || res < limits[count])
+      return NULL;  /* invalid byte sequence */
+    s += count;  /* skip continuation bytes read */
+  }
+  if (strict) {
+    /* check for invalid code points; too large or surrogates */
+    if (res > MAXUNICODE || (0xD800u <= res && res <= 0xDFFFu))
+      return NULL;
+  }
+  if (val) *val = res;
+  return s + 1;  /* +1 to include first byte */
+}
+
+/*
+** utfchar(n1, n2, ...)  -> char(n1)..char(n2)...
+*/
+static int utfchar (lua_State *L) {
+  int n = lua_gettop(L);  /* number of arguments */
+  if (n == 1)  /* optimize common case of single char */
+    pushutfchar(L, 1);
+  else {
+    int i;
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    for (i = 1; i <= n; i++) {
+      pushutfchar(L, i);
+      luaL_addvalue(&b);
+    }
+    luaL_pushresult(&b);
+  }
+  return 1;
+}
+
+/*
+** utf8len(s [, i [, j [, lax]]]) --> number of characters that
+** start in the range [i,j], or nil + current position if 's' is not
+** well formed in that interval
+*/
+static int utflen (lua_State *L) {
+  lua_Integer n = 0;  /* counter for the number of characters */
+  size_t len;  /* string length in bytes */
+  const char *s = luaL_checklstring(L, 1, &len);
+  lua_Integer posi = u_posrelat(luaL_optinteger(L, 2, 1), len);
+  lua_Integer posj = u_posrelat(luaL_optinteger(L, 3, -1), len);
+  int lax = lua_toboolean(L, 4);
+  luaL_argcheck(L, 1 <= posi && --posi <= (lua_Integer)len, 2,
+                   "initial position out of string");
+  luaL_argcheck(L, --posj < (lua_Integer)len, 3,
+                   "final position out of string");
+  while (posi <= posj) {
+    const char *s1 = utf8_decode(s + posi, NULL, !lax);
+    if (s1 == NULL) {  /* conversion error? */
+      luaL_pushfail(L);  /* return fail ... */
+      lua_pushinteger(L, posi + 1);  /* ... and current position */
+      return 2;
+    }
+    posi = s1 - s;
+    n++;
+  }
+  lua_pushinteger(L, n);
+  return 1;
+}
+```
+
 ### Lua 动态库加载器库
 
 以下为`loadlib.c`
@@ -5304,6 +5623,8 @@ LUAMOD_API int luaopen_package (lua_State *L) {
 
 将语法解析器生成的AST转换成虚拟机可以调用运行的代码。
 
+<!--TODO-->
+
 ## Lua C类型函数
 
 以下为`lctype.c`和`lctype.h`
@@ -5338,3 +5659,5 @@ LUAI_DDEC(const lu_byte luai_ctype_[UCHAR_MAX + 2];)
 ## Lua 调试 (Debug)
 
 以下为`ldblib.c`, `ldebug.c`和`ldebug.h`
+
+<!--TODO-->
