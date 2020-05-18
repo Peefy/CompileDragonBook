@@ -2510,6 +2510,13 @@ const char *luaO_pushvfstring (lua_State *L, const char *fmt, va_list argp) {
 
 以下为`lgc.c`和`lgc.h`
 
+可回收的对象可能具有以下三种颜色之一：白色，表示未标记该对象； 
+灰色，表示该对象已标记，但其引用可能未标记； 和黑色，表示该对象及其所有引用均已标记。 
+垃圾收集器在标记对象时的主要不变性是，黑色对象永远不能指向白色对象。 
+此外，任何灰色物体都必须在“灰色列表”中（灰色，再次灰色，弱，全弱，星历），
+以便在完成收集周期之前可以再次对其进行访问。 当不强制执行不变式时（例如，扫描阶段），
+这些列表没有意义。
+
 ```cpp
 /*
 ** Union of all collectable objects (only for conversions)
@@ -2525,6 +2532,37 @@ union GCUnion {
   struct lua_State th;  /* thread */
   struct UpVal upv;
 };
+```
+
+```cpp
+/*
+** Possible states of the Garbage Collector
+垃圾回收器的可能状态
+*/
+#define GCSpropagate	0
+#define GCSenteratomic	1
+#define GCSatomic	2
+#define GCSswpallgc	3
+#define GCSswpfinobj	4
+#define GCSswptobefnz	5
+#define GCSswpend	6
+#define GCScallfin	7
+#define GCSpause	8
+```
+
+Lua GC API
+
+```cpp
+LUAI_FUNC void luaC_fix (lua_State *L, GCObject *o);
+LUAI_FUNC void luaC_freeallobjects (lua_State *L);
+LUAI_FUNC void luaC_step (lua_State *L);
+LUAI_FUNC void luaC_runtilstate (lua_State *L, int statesmask);
+LUAI_FUNC void luaC_fullgc (lua_State *L, int isemergency);
+LUAI_FUNC GCObject *luaC_newobj (lua_State *L, int tt, size_t sz);
+LUAI_FUNC void luaC_barrier_ (lua_State *L, GCObject *o, GCObject *v);
+LUAI_FUNC void luaC_barrierback_ (lua_State *L, GCObject *o);
+LUAI_FUNC void luaC_checkfinalizer (lua_State *L, GCObject *o, Table *mt);
+LUAI_FUNC void luaC_changemode (lua_State *L, int newmode);
 ```
 
 <!--TODO-->
