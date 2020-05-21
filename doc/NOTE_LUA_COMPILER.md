@@ -6827,7 +6827,1009 @@ LUAI_FUNC void luaK_finish (FuncState *fs);
 LUAI_FUNC l_noret luaK_semerror (LexState *ls, const char *msg);
 ```
 
-<!--TODO-->
+```cpp
+/* Maximum number of registers in a Lua function (must fit in 8 bits) 
+Lua函数中的最大寄存器数（必须适合8位） */
+#define MAXREGS		255
+```
+
+Lua 代码生成器部分相关API
+
+```cpp
+/*
+** If expression is a constant, fills 'v' with its value
+** and returns 1. Otherwise, returns 0.
+如果expression是常量，则用其值填充'v'并返回1。否则，返回0。
+*/
+int luaK_exp2const (FuncState *fs, const expdesc *e, TValue *v) {
+  if (hasjumps(e))
+    return 0;  /* not a constant */
+  switch (e->k) {
+    case VFALSE: case VTRUE:
+      setbvalue(v, e->k == VTRUE);
+      return 1;
+    case VNIL:
+      setnilvalue(v);
+      return 1;
+    case VKSTR: {
+      setsvalue(fs->ls->L, v, e->u.strval);
+      return 1;
+    }
+    case VCONST: {
+      setobj(fs->ls->L, v, const2val(fs, e));
+      return 1;
+    }
+    default: return tonumeral(e, v);
+  }
+}
+
+/*
+** Create a OP_LOADNIL instruction, but try to optimize: if the previous
+** instruction is also OP_LOADNIL and ranges are compatible, adjust
+** range of previous instruction instead of emitting a new one. (For
+** instance, 'local a; local b' will generate a single opcode.)
+创建一个OP_LOADNIL指令，但要进行优化：如果前一条指令也是OP_LOADNIL并且范围兼容，
+请调整前一条指令的范围，而不发出新的指令。 （例如，“ local a; local b”将生成一个操作码。）
+*/
+void luaK_nil (FuncState *fs, int from, int n) {
+  int l = from + n - 1;  /* last register to set nil */
+  Instruction *previous = previousinstruction(fs);
+  if (GET_OPCODE(*previous) == OP_LOADNIL) {  /* previous is LOADNIL? */
+    int pfrom = GETARG_A(*previous);  /* get previous range */
+    int pl = pfrom + GETARG_B(*previous);
+    if ((pfrom <= from && from <= pl + 1) ||
+        (from <= pfrom && pfrom <= l + 1)) {  /* can connect both? */
+      if (pfrom < from) from = pfrom;  /* from = min(from, pfrom) */
+      if (pl > l) l = pl;  /* l = max(l, pl) */
+      SETARG_A(*previous, from);
+      SETARG_B(*previous, l - from);
+      return;
+    }  /* else go through 否则经历 */
+  }
+  luaK_codeABC(fs, OP_LOADNIL, from, n - 1, 0);  /* else no optimization */
+}
+
+/*
+** Gets the destination address of a jump instruction. Used to traverse
+** a list of jumps.
+获取跳转指令的目标地址。 用于遍历跳转列表。
+*/
+static int getjump (FuncState *fs, int pc) {
+  int offset = GETARG_sJ(fs->f->code[pc]);
+  if (offset == NO_JUMP)  /* point to itself represents end of list 
+  指向自身表示列表的结尾 */
+    return NO_JUMP;  /* end of list */
+  else
+    return (pc+1)+offset;  /* turn offset into absolute position */
+}
+
+/*
+** Fix jump instruction at position 'pc' to jump to 'dest'.
+** (Jump addresses are relative in Lua)
+将跳转指令固定在位置“pc”以跳转到“目标”。 （跳转地址在Lua中是相对的）
+*/
+static void fixjump (FuncState *fs, int pc, int dest) {
+  Instruction *jmp = &fs->f->code[pc];
+  int offset = dest - (pc + 1);
+  lua_assert(dest != NO_JUMP);
+  if (!(-OFFSET_sJ <= offset && offset <= MAXARG_sJ - OFFSET_sJ))
+    luaX_syntaxerror(fs->ls, "control structure too long");
+  lua_assert(GET_OPCODE(*jmp) == OP_JMP);
+  SETARG_sJ(*jmp, offset);
+}
+```
+
+```cpp
+/*
+** Emit instruction 'i', checking for array sizes and saving also its
+** line information. Return 'i' position.
+发出指令“i”，检查数组大小并保存其行信息。返回“i”位置。
+*/
+int luaK_code (FuncState *fs, Instruction i) {
+  Proto *f = fs->f;
+  /* put new instruction in code array */
+  luaM_growvector(fs->ls->L, f->code, fs->pc, f->sizecode, Instruction,
+                  MAX_INT, "opcodes");
+  f->code[fs->pc++] = i;
+  savelineinfo(fs, f, fs->ls->lastline);
+  return fs->pc - 1;  /* index of new instruction */
+}
+
+
+/*
+** Format and emit an 'iABC' instruction. (Assertions check consistency
+** of parameters versus opcode.)
+格式化并发出“ iABC”指令。 （断言检查参数与操作码的一致性。）
+*/
+int luaK_codeABCk (FuncState *fs, OpCode o, int a, int b, int c, int k) {
+  lua_assert(getOpMode(o) == iABC);
+  lua_assert(a <= MAXARG_A && b <= MAXARG_B &&
+             c <= MAXARG_C && (k & ~1) == 0);
+  return luaK_code(fs, CREATE_ABCk(o, a, b, c, k));
+}
+
+
+/*
+** Format and emit an 'iABx' instruction.
+格式化并发出“iABx”指令。
+*/
+int luaK_codeABx (FuncState *fs, OpCode o, int a, unsigned int bc) {
+  lua_assert(getOpMode(o) == iABx);
+  lua_assert(a <= MAXARG_A && bc <= MAXARG_Bx);
+  return luaK_code(fs, CREATE_ABx(o, a, bc));
+}
+
+
+/*
+** Format and emit an 'iAsBx' instruction.
+格式化并发出“iAsBx”指令。
+*/
+int luaK_codeAsBx (FuncState *fs, OpCode o, int a, int bc) {
+  unsigned int b = bc + OFFSET_sBx;
+  lua_assert(getOpMode(o) == iAsBx);
+  lua_assert(a <= MAXARG_A && b <= MAXARG_Bx);
+  return luaK_code(fs, CREATE_ABx(o, a, b));
+}
+
+
+/*
+** Format and emit an 'isJ' instruction.
+格式化并发出“isJ”指令。
+*/
+static int codesJ (FuncState *fs, OpCode o, int sj, int k) {
+  unsigned int j = sj + OFFSET_sJ;
+  lua_assert(getOpMode(o) == isJ);
+  lua_assert(j <= MAXARG_sJ && (k & ~1) == 0);
+  return luaK_code(fs, CREATE_sJ(o, j, k));
+}
+
+
+/*
+** Emit an "extra argument" instruction (format 'iAx')
+发出“额外参数”指令（格式为“ iAx”）
+*/
+static int codeextraarg (FuncState *fs, int a) {
+  lua_assert(a <= MAXARG_Ax);
+  return luaK_code(fs, CREATE_Ax(OP_EXTRAARG, a));
+}
+
+/*
+** Emit a "load constant" instruction, using either 'OP_LOADK'
+** (if constant index 'k' fits in 18 bits) or an 'OP_LOADKX'
+** instruction with "extra argument".
+使用 “OP_LOADK”（如果常数索引“k”适合18位）或
+带有“额外参数”的“OP_LOADKX”指令发出“加载常数”指令。
+*/
+static int luaK_codek (FuncState *fs, int reg, int k) {
+  if (k <= MAXARG_Bx)
+    return luaK_codeABx(fs, OP_LOADK, reg, k);
+  else {
+    int p = luaK_codeABx(fs, OP_LOADKX, reg, 0);
+    codeextraarg(fs, k);
+    return p;
+  }
+}
+```
+
+```cpp
+/*
+** Add an integer to list of constants and return its index.
+** Integers use userdata as keys to avoid collision with floats with
+** same value; conversion to 'void*' is used only for hashing, so there
+** are no "precision" problems.
+在常量列表中添加一个整数并返回其索引。
+整数使用userdata作为键，以避免与具有相同值的float发生冲突；
+转换为 “void *” 仅用于哈希，因此不存在“精度”问题。
+*/
+static int luaK_intK (FuncState *fs, lua_Integer n) {
+  TValue k, o;
+  setpvalue(&k, cast_voidp(cast_sizet(n)));
+  setivalue(&o, n);
+  return addk(fs, &k, &o);
+}
+
+/*
+** Add a float to list of constants and return its index.
+在常量列表中添加一个float并返回其索引。
+*/
+static int luaK_numberK (FuncState *fs, lua_Number r) {
+  TValue o;
+  setfltvalue(&o, r);
+  return addk(fs, &o, &o);  /* use number itself as key */
+}
+
+
+/*
+** Add a boolean to list of constants and return its index.
+向常量列表添加一个布尔值并返回其索引。
+*/
+static int boolK (FuncState *fs, int b) {
+  TValue o;
+  setbvalue(&o, b);
+  return addk(fs, &o, &o);  /* use boolean itself as key */
+}
+
+
+/*
+** Add nil to list of constants and return its index.
+在常量列表中添加nil并返回其索引。
+*/
+static int nilK (FuncState *fs) {
+  TValue k, v;
+  setnilvalue(&v);
+  /* cannot use nil as key; instead use table itself to represent nil */
+  sethvalue(fs->ls->L, &k, fs->ls->h);
+  return addk(fs, &k, &v);
+}
+
+
+/*
+** Check whether 'i' can be stored in an 'sC' operand. Equivalent to
+** (0 <= int2sC(i) && int2sC(i) <= MAXARG_C) but without risk of
+** overflows in the hidden addition inside 'int2sC'.
+检查“i”是否可以存储在“sC”操作数中。 
+等效于（0 <= int2sC（i）&& int2sC（i）<= MAXARG_C），
+但在'int2sC'内部隐藏的加法运算中没有溢出的风险。
+*/
+static int fitsC (lua_Integer i) {
+  return (l_castS2U(i) + OFFSET_sC <= cast_uint(MAXARG_C));
+}
+
+
+/*
+** Check whether 'i' can be stored in an 'sBx' operand.
+检查 “i” 是否可以存储在“ sBx”操作数中。
+*/
+static int fitsBx (lua_Integer i) {
+  return (-OFFSET_sBx <= i && i <= MAXARG_Bx - OFFSET_sBx);
+}
+```
+
+```cpp
+void luaK_int (FuncState *fs, int reg, lua_Integer i) {
+  if (fitsBx(i))
+    luaK_codeAsBx(fs, OP_LOADI, reg, cast_int(i));
+  else
+    luaK_codek(fs, reg, luaK_intK(fs, i));
+}
+
+
+static void luaK_float (FuncState *fs, int reg, lua_Number f) {
+  lua_Integer fi;
+  if (luaV_flttointeger(f, &fi, 0) && fitsBx(fi))
+    luaK_codeAsBx(fs, OP_LOADF, reg, cast_int(fi));
+  else
+    luaK_codek(fs, reg, luaK_numberK(fs, f));
+}
+
+
+/*
+** Convert a constant in 'v' into an expression description 'e'
+将 “v” 中的常量转换为表达式描述 “e”
+*/
+static void const2exp (TValue *v, expdesc *e) {
+  switch (ttypetag(v)) {
+    case LUA_TNUMINT:
+      e->k = VKINT; e->u.ival = ivalue(v);
+      break;
+    case LUA_TNUMFLT:
+      e->k = VKFLT; e->u.nval = fltvalue(v);
+      break;
+    case LUA_TBOOLEAN:
+      e->k = bvalue(v) ? VTRUE : VFALSE;
+      break;
+    case LUA_TNIL:
+      e->k = VNIL;
+      break;
+    case LUA_TSHRSTR:  case LUA_TLNGSTR:
+      e->k = VKSTR; e->u.strval = tsvalue(v);
+      break;
+    default: lua_assert(0);
+  }
+}
+
+
+/*
+** Fix an expression to return the number of results 'nresults'.
+** Either 'e' is a multi-ret expression (function call or vararg)
+** or 'nresults' is LUA_MULTRET (as any expression can satisfy that).
+修复表达式以返回结果 “nresults”的数量。 
+“e”是多列表达式（函数调用或vararg），或者“nresults”是LUA_MULTRET（因为任何表达式都可以满足）。
+*/
+void luaK_setreturns (FuncState *fs, expdesc *e, int nresults) {
+  Instruction *pc = &getinstruction(fs, e);
+  if (e->k == VCALL)  /* expression is an open function call? */
+    SETARG_C(*pc, nresults + 1);
+  else if (e->k == VVARARG) {
+    SETARG_C(*pc, nresults + 1);
+    SETARG_A(*pc, fs->freereg);
+    luaK_reserveregs(fs, 1);
+  }
+  else lua_assert(nresults == LUA_MULTRET);
+}
+```
+
+```cpp
+/*
+** Ensure that expression 'e' is not a variable (nor a constant).
+** (Expression still may have jump lists.)
+确保表达式“e”不是变量（也不是常量）。 
+（表达式仍可能具有跳转列表。）
+*/
+void luaK_dischargevars (FuncState *fs, expdesc *e) {
+  switch (e->k) {
+    case VCONST: {
+      const2exp(const2val(fs, e), e);
+      break;
+    }
+    case VLOCAL: {  /* already in a register */
+      e->u.info = e->u.var.sidx;
+      e->k = VNONRELOC;  /* becomes a non-relocatable value */
+      break;
+    }
+    case VUPVAL: {  /* move value to some (pending) register */
+      e->u.info = luaK_codeABC(fs, OP_GETUPVAL, 0, e->u.info, 0);
+      e->k = VRELOC;
+      break;
+    }
+    case VINDEXUP: {
+      e->u.info = luaK_codeABC(fs, OP_GETTABUP, 0, e->u.ind.t, e->u.ind.idx);
+      e->k = VRELOC;
+      break;
+    }
+    case VINDEXI: {
+      freereg(fs, e->u.ind.t);
+      e->u.info = luaK_codeABC(fs, OP_GETI, 0, e->u.ind.t, e->u.ind.idx);
+      e->k = VRELOC;
+      break;
+    }
+    case VINDEXSTR: {
+      freereg(fs, e->u.ind.t);
+      e->u.info = luaK_codeABC(fs, OP_GETFIELD, 0, e->u.ind.t, e->u.ind.idx);
+      e->k = VRELOC;
+      break;
+    }
+    case VINDEXED: {
+      freeregs(fs, e->u.ind.t, e->u.ind.idx);
+      e->u.info = luaK_codeABC(fs, OP_GETTABLE, 0, e->u.ind.t, e->u.ind.idx);
+      e->k = VRELOC;
+      break;
+    }
+    case VVARARG: case VCALL: {
+      luaK_setoneret(fs, e);
+      break;
+    }
+    default: break;  /* there is one value available (somewhere) */
+  }
+}
+
+
+/*
+** Ensures expression value is in register 'reg' (and therefore
+** 'e' will become a non-relocatable expression).
+** (Expression still may have jump lists.)
+确保表达式值在寄存器“reg”中（因此，
+“e”将成为不可重定位的表达式）。 （表达式仍可能具有跳转列表。）
+*/
+static void discharge2reg (FuncState *fs, expdesc *e, int reg) {
+  luaK_dischargevars(fs, e);
+  switch (e->k) {
+    case VNIL: {
+      luaK_nil(fs, reg, 1);
+      break;
+    }
+    case VFALSE: case VTRUE: {
+      luaK_codeABC(fs, OP_LOADBOOL, reg, e->k == VTRUE, 0);
+      break;
+    }
+    case VKSTR: {
+      str2K(fs, e);
+    }  /* FALLTHROUGH */
+    case VK: {
+      luaK_codek(fs, reg, e->u.info);
+      break;
+    }
+    case VKFLT: {
+      luaK_float(fs, reg, e->u.nval);
+      break;
+    }
+    case VKINT: {
+      luaK_int(fs, reg, e->u.ival);
+      break;
+    }
+    case VRELOC: {
+      Instruction *pc = &getinstruction(fs, e);
+      SETARG_A(*pc, reg);  /* instruction will put result in 'reg' */
+      break;
+    }
+    case VNONRELOC: {
+      if (reg != e->u.info)
+        luaK_codeABC(fs, OP_MOVE, reg, e->u.info, 0);
+      break;
+    }
+    default: {
+      lua_assert(e->k == VJMP);
+      return;  /* nothing to do... */
+    }
+  }
+  e->u.info = reg;
+  e->k = VNONRELOC;
+}
+
+
+/*
+** Ensures expression value is in any register.
+** (Expression still may have jump lists.)
+确保表达式值在任何寄存器中（表达式仍可能具有跳转列表。）
+*/
+static void discharge2anyreg (FuncState *fs, expdesc *e) {
+  if (e->k != VNONRELOC) {  /* no fixed register yet? */
+    luaK_reserveregs(fs, 1);  /* get a register */
+    discharge2reg(fs, e, fs->freereg-1);  /* put value there */
+  }
+}
+
+
+static int code_loadbool (FuncState *fs, int A, int b, int jump) {
+  luaK_getlabel(fs);  /* those instructions may be jump targets */
+  return luaK_codeABC(fs, OP_LOADBOOL, A, b, jump);
+}
+```
+
+```cpp
+/*
+** Emit code to go through if 'e' is false, jump otherwise.
+如果“e”为假，则发送代码以通过，否则跳转。
+*/
+void luaK_goiffalse (FuncState *fs, expdesc *e) {
+  int pc;  /* pc of new jump */
+  luaK_dischargevars(fs, e);
+  switch (e->k) {
+    case VJMP: {
+      pc = e->u.info;  /* already jump if true */
+      break;
+    }
+    case VNIL: case VFALSE: {
+      pc = NO_JUMP;  /* always false; do nothing */
+      break;
+    }
+    default: {
+      pc = jumponcond(fs, e, 1);  /* jump if true */
+      break;
+    }
+  }
+  luaK_concat(fs, &e->t, pc);  /* insert new jump in 't' list */
+  luaK_patchtohere(fs, e->f);  /* false list jumps to here (to go through) */
+  e->f = NO_JUMP;
+}
+
+
+/*
+** Code 'not e', doing constant folding.
+代码“not e”，不断折叠。
+*/
+static void codenot (FuncState *fs, expdesc *e) {
+  switch (e->k) {
+    case VNIL: case VFALSE: {
+      e->k = VTRUE;  /* true == not nil == not false */
+      break;
+    }
+    case VK: case VKFLT: case VKINT: case VKSTR: case VTRUE: {
+      e->k = VFALSE;  /* false == not "x" == not 0.5 == not 1 == not true */
+      break;
+    }
+    case VJMP: {
+      negatecondition(fs, e);
+      break;
+    }
+    case VRELOC:
+    case VNONRELOC: {
+      discharge2anyreg(fs, e);
+      freeexp(fs, e);
+      e->u.info = luaK_codeABC(fs, OP_NOT, 0, e->u.info, 0);
+      e->k = VRELOC;
+      break;
+    }
+    default: lua_assert(0);  /* cannot happen */
+  }
+  /* interchange true and false lists */
+  { int temp = e->f; e->f = e->t; e->t = temp; }
+  removevalues(fs, e->f);  /* values are useless when negated */
+  removevalues(fs, e->t);
+}
+
+
+/*
+** Check whether expression 'e' is a small literal string
+检查表达式 “e” 是否为小文字字符串
+*/
+static int isKstr (FuncState *fs, expdesc *e) {
+  return (e->k == VK && !hasjumps(e) && e->u.info <= MAXARG_B &&
+          ttisshrstring(&fs->f->k[e->u.info]));
+}
+
+/*
+** Check whether expression 'e' is a literal integer.
+检查表达式 “e” 是否为文字整数。
+*/
+int luaK_isKint (expdesc *e) {
+  return (e->k == VKINT && !hasjumps(e));
+}
+
+
+/*
+** Check whether expression 'e' is a literal integer in
+** proper range to fit in register C
+检查表达式“e”是否为适当范围内的文字整数以适合寄存器C
+*/
+static int isCint (expdesc *e) {
+  return luaK_isKint(e) && (l_castS2U(e->u.ival) <= l_castS2U(MAXARG_C));
+}
+
+
+/*
+** Check whether expression 'e' is a literal integer in
+** proper range to fit in register sC
+检查表达式“e”是否为适当范围内的文字整数以适合寄存器sC
+*/
+static int isSCint (expdesc *e) {
+  return luaK_isKint(e) && fitsC(e->u.ival);
+}
+
+
+/*
+** Check whether expression 'e' is a literal integer or float in
+** proper range to fit in a register (sB or sC).
+检查表达式“e”是文字整数还是浮点数在适当范围内以适合寄存器（sB或sC）。
+*/
+static int isSCnumber (expdesc *e, int *pi, int *isfloat) {
+  lua_Integer i;
+  if (e->k == VKINT)
+    i = e->u.ival;
+  else if (e->k == VKFLT && luaV_flttointeger(e->u.nval, &i, 0))
+    *isfloat = 1;
+  else
+    return 0;  /* not a number */
+  if (!hasjumps(e) && fitsC(i)) {
+    *pi = int2sC(cast_int(i));
+    return 1;
+  }
+  else
+    return 0;
+}
+```
+
+```cpp
+/*
+** Create expression 't[k]'. 't' must have its final result already in a
+** register or upvalue. Upvalues can only be indexed by literal strings.
+** Keys can be literal strings in the constant table or arbitrary
+** values in registers.
+创建表达式 “t[k]”。 “t” 必须已将其最终结果存储在寄存器或高值中。
+升值只能由文字字符串索引。 键可以是常量表中的文字字符串，也可以是寄存器中的任意值。
+*/
+void luaK_indexed (FuncState *fs, expdesc *t, expdesc *k) {
+  if (k->k == VKSTR)
+    str2K(fs, k);
+  lua_assert(!hasjumps(t) &&
+             (t->k == VLOCAL || t->k == VNONRELOC || t->k == VUPVAL));
+  if (t->k == VUPVAL && !isKstr(fs, k))  /* upvalue indexed by non 'Kstr'? */
+    luaK_exp2anyreg(fs, t);  /* put it in a register */
+  if (t->k == VUPVAL) {
+    t->u.ind.t = t->u.info;  /* upvalue index */
+    t->u.ind.idx = k->u.info;  /* literal string */
+    t->k = VINDEXUP;
+  }
+  else {
+    /* register index of the table */
+    t->u.ind.t = (t->k == VLOCAL) ? t->u.var.sidx: t->u.info;
+    if (isKstr(fs, k)) {
+      t->u.ind.idx = k->u.info;  /* literal string */
+      t->k = VINDEXSTR;
+    }
+    else if (isCint(k)) {
+      t->u.ind.idx = cast_int(k->u.ival);  /* int. constant in proper range */
+      t->k = VINDEXI;
+    }
+    else {
+      t->u.ind.idx = luaK_exp2anyreg(fs, k);  /* register */
+      t->k = VINDEXED;
+    }
+  }
+}
+
+
+/*
+** Return false if folding can raise an error.
+** Bitwise operations need operands convertible to integers; division
+** operations cannot have 0 as divisor.
+如果折叠会引发错误，则返回false。 按位运算需要可转换为整数的操作数； 除法运算的除数不能为0。
+*/
+static int validop (int op, TValue *v1, TValue *v2) {
+  switch (op) {
+    case LUA_OPBAND: case LUA_OPBOR: case LUA_OPBXOR:
+    case LUA_OPSHL: case LUA_OPSHR: case LUA_OPBNOT: {  /* conversion errors */
+      lua_Integer i;
+      return (tointegerns(v1, &i) && tointegerns(v2, &i));
+    }
+    case LUA_OPDIV: case LUA_OPIDIV: case LUA_OPMOD:  /* division by 0 */
+      return (nvalue(v2) != 0);
+    default: return 1;  /* everything else is valid */
+  }
+}
+
+
+/*
+** Try to "constant-fold" an operation; return 1 iff successful.
+** (In this case, 'e1' has the final result.)
+尝试“恒定折叠”操作； 成功时返回1。（在这种情况下，“ e1”具有最终结果。）
+*/
+static int constfolding (FuncState *fs, int op, expdesc *e1,
+                                        const expdesc *e2) {
+  TValue v1, v2, res;
+  if (!tonumeral(e1, &v1) || !tonumeral(e2, &v2) || !validop(op, &v1, &v2))
+    return 0;  /* non-numeric operands or not safe to fold */
+  luaO_rawarith(fs->ls->L, op, &v1, &v2, &res);  /* does operation */
+  if (ttisinteger(&res)) {
+    e1->k = VKINT;
+    e1->u.ival = ivalue(&res);
+  }
+  else {  /* folds neither NaN nor 0.0 (to avoid problems with -0.0) */
+    lua_Number n = fltvalue(&res);
+    if (luai_numisnan(n) || n == 0)
+      return 0;
+    e1->k = VKFLT;
+    e1->u.nval = n;
+  }
+  return 1;
+}
+
+
+/*
+** Emit code for unary expressions that "produce values"
+** (everything but 'not').
+** Expression to produce final result will be encoded in 'e'.
+为 “产生值”（所有但不是）的一元表达式发出代码。 产生最终结果的表达式将被编码为 “e”。
+*/
+static void codeunexpval (FuncState *fs, OpCode op, expdesc *e, int line) {
+  int r = luaK_exp2anyreg(fs, e);  /* opcodes operate only on registers */
+  freeexp(fs, e);
+  e->u.info = luaK_codeABC(fs, op, 0, r, 0);  /* generate opcode */
+  e->k = VRELOC;  /* all those operations are relocatable */
+  luaK_fixline(fs, line);
+}
+
+
+/*
+** Emit code for binary expressions that "produce values"
+** (everything but logical operators 'and'/'or' and comparison
+** operators).
+** Expression to produce final result will be encoded in 'e1'.
+为“产生值”的二进制表达式发出代码（除逻辑运算符“and”/“or”和比较运算符外的所有内容）。 
+产生最终结果的表达式将被编码为“e1”。
+*/
+static void finishbinexpval (FuncState *fs, expdesc *e1, expdesc *e2,
+                             OpCode op, int v2, int flip, int line,
+                             OpCode mmop, TMS event) {
+  int v1 = luaK_exp2anyreg(fs, e1);
+  int pc = luaK_codeABCk(fs, op, 0, v1, v2, 0);
+  freeexps(fs, e1, e2);
+  e1->u.info = pc;
+  e1->k = VRELOC;  /* all those operations are relocatable */
+  luaK_fixline(fs, line);
+  luaK_codeABCk(fs, mmop, v1, v2, event, flip);  /* to call metamethod */
+  luaK_fixline(fs, line);
+}
+
+
+/*
+** Emit code for binary expressions that "produce values" over
+** two registers.
+为在两个寄存器中“产生值”的二进制表达式发出代码。
+*/
+static void codebinexpval (FuncState *fs, OpCode op,
+                           expdesc *e1, expdesc *e2, int line) {
+  int v2 = luaK_exp2anyreg(fs, e2);  /* both operands are in registers */
+  lua_assert(OP_ADD <= op && op <= OP_SHR);
+  finishbinexpval(fs, e1, e2, op, v2, 0, line, OP_MMBIN,
+                  cast(TMS, (op - OP_ADD) + TM_ADD));
+}
+
+
+/*
+** Code binary operators with immediate operands.
+使用立即数对二进制运算符进行编码。
+*/
+static void codebini (FuncState *fs, OpCode op,
+                       expdesc *e1, expdesc *e2, int flip, int line,
+                       TMS event) {
+  int v2 = int2sC(cast_int(e2->u.ival));  /* immediate operand */
+  lua_assert(e2->k == VKINT);
+  finishbinexpval(fs, e1, e2, op, v2, flip, line, OP_MMBINI, event);
+}
+
+
+/* Try to code a binary operator negating its second operand.
+** For the metamethod, 2nd operand must keep its original value.
+尝试编写一个二进制运算符，使其第二个操作数取反。 对于元方法，第二个操作数必须保留其原始值。
+*/
+static int finishbinexpneg (FuncState *fs, expdesc *e1, expdesc *e2,
+                             OpCode op, int line, TMS event) {
+  if (!luaK_isKint(e2))
+    return 0;  /* not an integer constant */
+  else {
+    lua_Integer i2 = e2->u.ival;
+    if (!(fitsC(i2) && fitsC(-i2)))
+      return 0;  /* not in the proper range */
+    else {  /* operating a small integer constant */
+      int v2 = cast_int(i2);
+      finishbinexpval(fs, e1, e2, op, int2sC(-v2), 0, line, OP_MMBINI, event);
+      /* correct metamethod argument */
+      SETARG_B(fs->f->code[fs->pc - 1], int2sC(v2));
+      return 1;  /* successfully coded */
+    }
+  }
+}
+```
+
+```cpp
+/*
+** Code arithmetic operators ('+', '-', ...). If second operand is a
+** constant in the proper range, use variant opcodes with K operands.
+代码算术运算符（'+'，'-'，...）。 如果第二个操作数是在适当范围内的常数，
+则使用带有K个操作数的变体操作码。
+*/
+static void codearith (FuncState *fs, BinOpr opr,
+                       expdesc *e1, expdesc *e2, int flip, int line) {
+  TMS event = cast(TMS, opr + TM_ADD);
+  if (tonumeral(e2, NULL) && luaK_exp2K(fs, e2)) {  /* K operand? */
+    int v2 = e2->u.info;  /* K index */
+    OpCode op = cast(OpCode, opr + OP_ADDK);
+    finishbinexpval(fs, e1, e2, op, v2, flip, line, OP_MMBINK, event);
+  }
+  else {  /* 'e2' is neither an immediate nor a K operand */
+    OpCode op = cast(OpCode, opr + OP_ADD);
+    if (flip)
+      swapexps(e1, e2);  /* back to original order */
+    codebinexpval(fs, op, e1, e2, line);  /* use standard operators */
+  }
+}
+
+
+/*
+** Code commutative operators ('+', '*'). If first operand is a
+** numeric constant, change order of operands to try to use an
+** immediate or K operator.
+代码交换运算符（“ +”，“ *”）。 如果第一个操作数是数字常量，
+请更改操作数的顺序以尝试使用立即数或K运算符。
+*/
+static void codecommutative (FuncState *fs, BinOpr op,
+                             expdesc *e1, expdesc *e2, int line) {
+  int flip = 0;
+  if (tonumeral(e1, NULL)) {  /* is first operand a numeric constant? */
+    swapexps(e1, e2);  /* change order */
+    flip = 1;
+  }
+  if (op == OPR_ADD && isSCint(e2))  /* immediate operand? */
+    codebini(fs, cast(OpCode, OP_ADDI), e1, e2, flip, line, TM_ADD);
+  else
+    codearith(fs, op, e1, e2, flip, line);
+}
+
+
+/*
+** Code bitwise operations; they are all associative, so the function
+** tries to put an integer constant as the 2nd operand (a K operand).
+代码按位运算；它们都是关联的，因此该函数尝试将整数常量作为第二个操作数（K个操作数）。
+*/
+static void codebitwise (FuncState *fs, BinOpr opr,
+                         expdesc *e1, expdesc *e2, int line) {
+  int flip = 0;
+  int v2;
+  OpCode op;
+  if (e1->k == VKINT && luaK_exp2RK(fs, e1)) {
+    swapexps(e1, e2);  /* 'e2' will be the constant operand */
+    flip = 1;
+  }
+  else if (!(e2->k == VKINT && luaK_exp2RK(fs, e2))) {  /* no constants? */
+    op = cast(OpCode, opr + OP_ADD);
+    codebinexpval(fs, op, e1, e2, line);  /* all-register opcodes */
+    return;
+  }
+  v2 = e2->u.info;  /* index in K array */
+  op = cast(OpCode, opr + OP_ADDK);
+  lua_assert(ttisinteger(&fs->f->k[v2]));
+  finishbinexpval(fs, e1, e2, op, v2, flip, line, OP_MMBINK,
+                  cast(TMS, opr + TM_ADD));
+}
+
+
+/*
+** Emit code for order comparisons. When using an immediate operand,
+** 'isfloat' tells whether the original value was a float.
+发出代码以进行订单比较。使用立即数操作数时，“isfloat” 会告知原始值是否为浮点型。
+*/
+static void codeorder (FuncState *fs, OpCode op, expdesc *e1, expdesc *e2) {
+  int r1, r2;
+  int im;
+  int isfloat = 0;
+  if (isSCnumber(e2, &im, &isfloat)) {
+    /* use immediate operand */
+    r1 = luaK_exp2anyreg(fs, e1);
+    r2 = im;
+    op = cast(OpCode, (op - OP_LT) + OP_LTI);
+  }
+  else if (isSCnumber(e1, &im, &isfloat)) {
+    /* transform (A < B) to (B > A) and (A <= B) to (B >= A) */
+    r1 = luaK_exp2anyreg(fs, e2);
+    r2 = im;
+    op = (op == OP_LT) ? OP_GTI : OP_GEI;
+  }
+  else {  /* regular case, compare two registers */
+    r1 = luaK_exp2anyreg(fs, e1);
+    r2 = luaK_exp2anyreg(fs, e2);
+  }
+  freeexps(fs, e1, e2);
+  e1->u.info = condjump(fs, op, r1, r2, isfloat, 1);
+  e1->k = VJMP;
+}
+
+
+/*
+** Emit code for equality comparisons ('==', '~=').
+** 'e1' was already put as RK by 'luaK_infix'.
+发出用于相等性比较的代码（'=='，'〜='）。
+'luaK_infix'已将'e1'作为RK放置。
+*/
+static void codeeq (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2) {
+  int r1, r2;
+  int im;
+  int isfloat = 0;  /* not needed here, but kept for symmetry */
+  OpCode op;
+  if (e1->k != VNONRELOC) {
+    lua_assert(e1->k == VK || e1->k == VKINT || e1->k == VKFLT);
+    swapexps(e1, e2);
+  }
+  r1 = luaK_exp2anyreg(fs, e1);  /* 1nd expression must be in register */
+  if (isSCnumber(e2, &im, &isfloat)) {
+    op = OP_EQI;
+    r2 = im;  /* immediate operand */
+  }
+  else if (luaK_exp2RK(fs, e2)) {  /* 1st expression is constant? */
+    op = OP_EQK;
+    r2 = e2->u.info;  /* constant index */
+  }
+  else {
+    op = OP_EQ;  /* will compare two registers */
+    r2 = luaK_exp2anyreg(fs, e2);
+  }
+  freeexps(fs, e1, e2);
+  e1->u.info = condjump(fs, op, r1, r2, isfloat, (opr == OPR_EQ));
+  e1->k = VJMP;
+}
+```
+
+```cpp
+/*
+** Finalize code for binary operation, after reading 2nd operand.
+在读取第二个操作数之后，完成二进制操作的代码。
+*/
+void luaK_posfix (FuncState *fs, BinOpr opr,
+                  expdesc *e1, expdesc *e2, int line) {
+  luaK_dischargevars(fs, e2);
+  if (foldbinop(opr) && constfolding(fs, opr + LUA_OPADD, e1, e2))
+    return;  /* done by folding */
+  switch (opr) {
+    case OPR_AND: {
+      lua_assert(e1->t == NO_JUMP);  /* list closed by 'luaK_infix' */
+      luaK_concat(fs, &e2->f, e1->f);
+      *e1 = *e2;
+      break;
+    }
+    case OPR_OR: {
+      lua_assert(e1->f == NO_JUMP);  /* list closed by 'luaK_infix' */
+      luaK_concat(fs, &e2->t, e1->t);
+      *e1 = *e2;
+      break;
+    }
+    case OPR_CONCAT: {  /* e1 .. e2 */
+      luaK_exp2nextreg(fs, e2);
+      codeconcat(fs, e1, e2, line);
+      break;
+    }
+    case OPR_ADD: case OPR_MUL: {
+      codecommutative(fs, opr, e1, e2, line);
+      break;
+    }
+    case OPR_SUB: {
+      if (finishbinexpneg(fs, e1, e2, OP_ADDI, line, TM_SUB))
+        break; /* coded as (r1 + -I) */
+      /* ELSE */
+    }  /* FALLTHROUGH */
+    case OPR_DIV: case OPR_IDIV: case OPR_MOD: case OPR_POW: {
+      codearith(fs, opr, e1, e2, 0, line);
+      break;
+    }
+    case OPR_BAND: case OPR_BOR: case OPR_BXOR: {
+      codebitwise(fs, opr, e1, e2, line);
+      break;
+    }
+    case OPR_SHL: {
+      if (isSCint(e1)) {
+        swapexps(e1, e2);
+        codebini(fs, OP_SHLI, e1, e2, 1, line, TM_SHL);  /* I << r2 */
+      }
+      else if (finishbinexpneg(fs, e1, e2, OP_SHRI, line, TM_SHL)) {
+        /* coded as (r1 >> -I) */;
+      }
+      else  /* regular case (two registers) */
+       codebinexpval(fs, OP_SHL, e1, e2, line);
+      break;
+    }
+    case OPR_SHR: {
+      if (isSCint(e2))
+        codebini(fs, OP_SHRI, e1, e2, 0, line, TM_SHR);  /* r1 >> I */
+      else  /* regular case (two registers) */
+        codebinexpval(fs, OP_SHR, e1, e2, line);
+      break;
+    }
+    case OPR_EQ: case OPR_NE: {
+      codeeq(fs, opr, e1, e2);
+      break;
+    }
+    case OPR_LT: case OPR_LE: {
+      OpCode op = cast(OpCode, (opr - OPR_EQ) + OP_EQ);
+      codeorder(fs, op, e1, e2);
+      break;
+    }
+    case OPR_GT: case OPR_GE: {
+      /* '(a > b)' <=> '(b < a)';  '(a >= b)' <=> '(b <= a)' */
+      OpCode op = cast(OpCode, (opr - OPR_NE) + OP_EQ);
+      swapexps(e1, e2);
+      codeorder(fs, op, e1, e2);
+      break;
+    }
+    default: lua_assert(0);
+  }
+}
+```
+
+```cpp
+/*
+** Do a final pass over the code of a function, doing small peephole
+** optimizations and adjustments.
+对函数代码进行最后遍历，进行一些小的窥孔优化和调整。
+*/
+void luaK_finish (FuncState *fs) {
+  int i;
+  Proto *p = fs->f;
+  for (i = 0; i < fs->pc; i++) {
+    Instruction *pc = &p->code[i];
+    lua_assert(i == 0 || isOT(*(pc - 1)) == isIT(*pc));
+    switch (GET_OPCODE(*pc)) {
+      case OP_RETURN0: case OP_RETURN1: {
+        if (!(fs->needclose || p->is_vararg))
+          break;  /* no extra work */
+        /* else use OP_RETURN to do the extra work */
+        SET_OPCODE(*pc, OP_RETURN);
+      }  /* FALLTHROUGH */
+      case OP_RETURN: case OP_TAILCALL: {
+        if (fs->needclose)
+          SETARG_k(*pc, 1);  /* signal that it needs to close */
+        if (p->is_vararg)
+          SETARG_C(*pc, p->numparams + 1);  /* signal that it is vararg */
+        break;
+      }
+      case OP_JMP: {
+        int target = finaltarget(p->code, i);
+        fixjump(fs, i, target);
+        break;
+      }
+      default: break;
+    }
+  }
+}
+```
 
 ## Lua C类型函数
 
