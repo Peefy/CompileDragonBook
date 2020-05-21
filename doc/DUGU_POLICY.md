@@ -2,7 +2,7 @@
 
 ## DuGu Policy (策略)
 
-[-opa，一个统一policy的方案，自带了json like dsl和controller](https://github.com/open-policy-agent/opa) 
+[-opa，一个统一策略(policy)的方案，自带了json like dsl和controller](https://github.com/open-policy-agent/opa) 
 
 [目前opa会把dsl的执行计划(policies)通过wasm打包编译为WebAssembly，然后让controller调用wasm程序做判断](https://github.com/open-policy-agent/opa/tree/master/wasm)  
 

@@ -1686,6 +1686,184 @@ int luaX_lookahead (LexState *ls) {
 
 可以延迟变量和表达式的代码生成，以允许优化；`expdesc`结构描述了可能延迟的变量/表达式。它具有其“主要”值的说明以及也可以产生其值的条件跳转列表（生成的由短路运算符`and`/`or`表示。
 
+```cpp
+/* kinds of variables/expressions 变量或者表达式的类型 */
+typedef enum {
+  VVOID,  /* when 'expdesc' describes the last expression a list,
+             this kind means an empty list (so, no expression) 
+             当“expdesc”描述列表的最后一个表达式时，
+             这种类型表示一个空列表（因此，没有表达式）*/
+  VNIL,  /* constant nil 常量 nil */
+  VTRUE,  /* constant true 常量 true */
+  VFALSE,  /* constant false 常量 false */
+  VK,  /* constant in 'k'; info = index of constant in 'k' 
+      'k'中的常数； info ='k'中常数的索引 */
+  VKFLT,  /* floating constant; nval = numerical float value 浮点常量，nval = numerical */
+  VKINT,  /* integer constant; ival = numerical integer value 整形常量 ival = numerical */
+  VKSTR,  /* string constant; strval = TString address;
+             (string is fixed by the lexer) 字符串常量 */
+  VNONRELOC,  /* expression has its value in a fixed register;
+                 info = result register 
+                 表达式在固定寄存器中具有其值； 信息=结果寄存器 */
+  VLOCAL,  /* local variable; var.ridx = local register;
+              var.vidx = relative index in 'actvar.arr' local 变量  */
+  VUPVAL,  /* upvalue variable; info = index of upvalue in 'upvalues' 升值变量 */
+  VCONST,  /* compile-time constant; info = absolute index in 'actvar.arr' 编译时常量 */
+  VINDEXED,  /* indexed variable;
+                ind.t = table register;
+                ind.idx = key's R index 
+                索引固定寻址 */
+  VINDEXUP,  /* indexed upvalue;
+                ind.t = table upvalue;
+                ind.idx = key's K index 
+                索引向上寻址 */
+  VINDEXI, /* indexed variable with constant integer;
+                ind.t = table register;
+                ind.idx = key's value 
+                具有恒定整数的索引变量；*/
+  VINDEXSTR, /* indexed variable with literal string;
+                ind.t = table register;
+                ind.idx = key's K index 
+                带文字字符串的索引变量；*/
+  VJMP,  /* expression is a test/comparison;
+            info = pc of corresponding jump instruction 
+            一种测试/比较表达式； info =相应跳转指令的pc*/
+  VRELOC,  /* expression can put result in any register;
+              可以将结果放入任何寄存器的表达式；
+              info = instruction pc */
+  VCALL,  /* expression is a function call; info = instruction pc 调用函数表达式 */
+  VVARARG  /* vararg expression; info = instruction pc 参数变量表达式 */
+} expkind;
+
+
+#define vkisvar(k)	(VLOCAL <= (k) && (k) <= VINDEXSTR)
+#define vkisindexed(k)	(VINDEXED <= (k) && (k) <= VINDEXSTR)
+```
+
+```cpp
+/* 表达式变量 */
+typedef struct expdesc {
+  expkind k;
+  union {
+    lua_Integer ival;    /* for VKINT 整形 */
+    lua_Number nval;  /* for VKFLT 浮点 */
+    TString *strval;  /* for VKSTR 字符串 */
+    int info;  /* for generic use 一般使用信息 */
+    struct {  /* for indexed variables 索引变量 */
+      short idx;  /* index (R or "long" K) 索引 */
+      lu_byte t;  /* table (register or upvalue) 表(寄存器或者升值) */
+    } ind;
+    struct {  /* for local variables 局部变量 */
+      lu_byte sidx;  /* index in the stack 栈中索引 */
+      unsigned short vidx;  /* index in 'actvar.arr' 索引 */
+    } var;
+  } u;
+  int t;  /* patch list of 'exit when true' 条件为真的附加列表 */
+  int f;  /* patch list of 'exit when false' 条件为假的附加列表 */
+} expdesc;
+```
+
+```cpp
+/* description of an active local variable 
+活动局部变量的描述 */
+typedef union Vardesc {
+  struct {
+    TValuefields;  /* constant value (if it is a compile-time constant) 
+                  常量值（如果它是编译时常量） */
+    lu_byte kind;
+    lu_byte sidx;  /* index of the variable in the stack 堆栈中变量的索引 */
+    short pidx;  /* index of the variable in the Proto's 'locvars' array 
+                Proto的“locvars”数组中变量的索引 */
+    TString *name;  /* variable name 变量名称 */
+  } vd;
+  TValue k;  /* constant value (if any) 常数值（如果有） */
+} Vardesc;
+```
+
+```cpp
+/* description of pending goto statements and label statements 
+未决的goto语句和label语句的描述  */
+typedef struct Labeldesc {
+  TString *name;  /* label identifier label标识符 */
+  int pc;  /* position in code 代码位置指针 */
+  int line;  /* line where it appeared 出现的行数 */
+  lu_byte nactvar;  /* number of active variables in that position 
+                  该位置的活动变量数 */
+  lu_byte close;  /* goto that escapes upvalues 逃避升值的goto */
+} Labeldesc;
+
+
+/* list of labels or gotos 
+标签或goto列表 */
+typedef struct Labellist {
+  Labeldesc *arr;  /* array 数组 */
+  int n;  /* number of entries in use 在用的元素个数 */
+  int size;  /* array size 数组空间 */
+} Labellist;
+
+
+/* dynamic structures used by the parser 
+解析器使用的动态结构 */
+typedef struct Dyndata {
+  struct {  /* list of active local variables 活动局部变量列表 */
+    Vardesc *arr;
+    int n;
+    int size;
+  } actvar;
+  Labellist gt;  /* list of pending gotos 待处理的goto列表 */
+  Labellist label;   /* list of active labels 活动标签的列表 */
+} Dyndata;
+```
+
+```cpp
+/*
+** nodes for block list (list of active blocks)
+块列表的节点（活动块的列表）
+*/
+typedef struct BlockCnt {
+  struct BlockCnt *previous;  /* chain 前一个活动块 */
+  int firstlabel;  /* index of first label in this block
+                    该块中第一个标签的索引 */
+  int firstgoto;  /* index of first pending goto in this block 
+                    此块中第一个挂起的goto的索引 */
+  lu_byte nactvar;  /* # active locals outside the block 
+                      块外的活动locals*/
+  lu_byte upval;  /* true if some variable in the block is an upvalue
+                     如果块中的某个变量是高值，则为true */
+  lu_byte isloop;  /* true if 'block' is a loop 
+                      如果'block'是循环，则为true */
+  lu_byte insidetbc;  /* true if inside the scope of a to-be-closed var. 
+                      如果在要关闭的var范围内，则为true。 */
+} BlockCnt;
+```
+
+```cpp
+/* state needed to generate code for a given function 
+为给定功能生成代码所需的状态 */
+typedef struct FuncState {
+  Proto *f;  /* current function header 当前函数的标头 */
+  struct FuncState *prev;  /* enclosing function 封闭函数 */
+  struct LexState *ls;  /* lexical state 词法分析器 */
+  struct BlockCnt *bl;  /* chain of current blocks 当前块链 */
+  int pc;  /* next position to code (equivalent to 'ncode') 下一个代码指针 */
+  int lasttarget;   /* 'label' of last 'jump label' 标签或上个跳转标签 */
+  int previousline;  /* last line that was saved in 'lineinfo' 前一行信息 */
+  int nk;  /* number of elements in 'k' k中的元素个数 */
+  int np;  /* number of elements in 'p' p中的元素个数 */
+  int nabslineinfo;  /* number of elements in 'abslineinfo' 绝对行信息的元素个数 */
+  int firstlocal;  /* index of first local var (in Dyndata array) 第一个局部变量的索引 */
+  int firstlabel;  /* index of first label (in 'dyd->label->arr') 第一个标签的索引 */
+  short ndebugvars;  /* number of elements in 'f->locvars' f->locvars的元素个数 */
+  lu_byte nactvar;  /* number of active local variables 活跃局部变量的个数 */
+  lu_byte nups;  /* number of upvalues 升值的个数 */
+  lu_byte freereg;  /* first free register 第一个释放的寄存器 */
+  lu_byte iwthabs;  /* instructions issued since last absolute line info 
+                    自上次绝对行信息以来发布的指令 */
+  lu_byte needclose;  /* function needs to close upvalues when returning 
+                      返回时函数需要关闭upvalues */
+} FuncState;
+```
+
 <!--TODO-->
 
 ## Lua 预编译
