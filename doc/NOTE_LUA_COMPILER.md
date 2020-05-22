@@ -1,7 +1,7 @@
 
 # Lua 编译器源码笔记
 
-主要包括了词法分析器，语法分析器，虚拟机(runtime，堆栈结构，操作码)，垃圾回收器，代码生成器以及Lua对象，Lua函数库，Lua调试器等。
+主要包括了词法分析器，语法分析器，虚拟机(runtime，堆栈结构，操作码)，垃圾回收器，代码生成器以及Lua对象，Lua函数库，Lua调试器等。其中运行时Runtime的垃圾回收器GC，虚拟机VM，语法解析器Parser，代码生成器Code Generator的工程量最大。
 
 ## Lua 主函数和命令行程序
 
@@ -1862,6 +1862,69 @@ typedef struct FuncState {
   lu_byte needclose;  /* function needs to close upvalues when returning 
                       返回时函数需要关闭upvalues */
 } FuncState;
+```
+
+```cpp
+LUAI_FUNC int luaY_nvarstack (FuncState *fs);
+LUAI_FUNC LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
+                                 Dyndata *dyd, const char *name, int firstchar);
+```
+
+Lua是递归下降语法分析，Lua的文法如下
+
+```txt
+statlist -> { stat [';'] }
+fieldsel -> ['.' | ':'] NAME
+index -> '[' expr ']'
+recfield -> (NAME | '['exp']') = exp
+listfield -> exp
+field -> listfield | recfield
+constructor -> '{' [ field { sep field } [sep] ] '}'
+sep -> ',' | ';'
+parlist -> [ param { ',' param } ]
+body ->  '(' parlist ')' block END 
+explist -> expr { ',' expr }
+funcargs -> '(' [ explist ] ')'
+funcargs -> constructor
+funcargs -> STRING
+primaryexp -> NAME | '(' expr ')'
+suffixedexp -> primaryexp { '.' NAME | '[' exp ']' | ':' NAME funcargs | funcargs }
+simpleexp -> FLT | INT | STRING | NIL | TRUE | FALSE | ... |
+                  constructor | FUNCTION body | suffixedexp
+subexpr -> (simpleexp | unop subexpr) { binop subexpr }
+expr -> subexpr
+block -> statlist
+assignment -> suffixedexp restassign
+restassign -> ',' suffixedexp restassign | '=' explist
+cond -> exp
+label -> '::' NAME '::'
+whilestat -> WHILE cond DO block END
+repeatstat -> REPEAT block UNTIL cond
+forbody -> DO block
+fornum -> NAME = exp,exp[,exp] forbody
+forlist -> NAME {,NAME} IN explist forbody
+forstat -> FOR (fornum | forlist) END
+test_then_block -> [IF | ELSEIF] cond THEN block
+ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END
+attrib -> ['<' NAME '>']
+localstat -> LOCAL attrib NAME {',' attrib NAME} ['=' explist]
+funcname -> NAME {fieldsel} [':' NAME]
+funcstat -> FUNCTION funcname body
+retstat -> RETURN [explist] [';']
+breakstat -> BREAK
+stat -> funcstat
+stat -> assignment
+stat -> ';' # empty statement
+stat -> ifstat
+stat -> whilestat
+stat -> DO block END
+stat -> forstat
+stat -> repeatstat
+stat -> localstat
+stat -> label
+stat -> retstat
+stat -> breakstat
+stat -> GOTO NAME
 ```
 
 <!--TODO-->
