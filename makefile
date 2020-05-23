@@ -40,4 +40,7 @@ run:
 	./$(EXEC)
 cleanimg:
 	-@$(RM) ./img/._*.*
+cleang4:
+	-@$(RM) ./src/ANTLR4/.antlr/*.*
+	-@$(RM) ./src/ANTLR4/.antlr/
 

@@ -14,7 +14,7 @@
 
 * [Lua编译器笔记](https://github.com/Peefy/CompileDragonBook/blob/master/doc/NOTE_LUA_COMPILER.md)
 
-* [ANTLR解析器生成器实践](https://github.com/Peefy/CompileDragonBook/blob/master/doc/NOTE_LUA_COMPILER.md)
+* [ANTLR解析器生成器实践](https://github.com/Peefy/CompileDragonBook/blob/master/doc/NOTE_ANTLR.md)
 
 * [Peefy Complier](https://github.com/Peefy/PeefyCompiler)
 
