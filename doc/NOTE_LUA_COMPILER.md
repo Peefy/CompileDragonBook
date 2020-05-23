@@ -1874,44 +1874,7 @@ Lua是递归下降语法分析，Lua的文法如下
 
 ```txt
 statlist -> { stat [';'] }
-fieldsel -> ['.' | ':'] NAME
-index -> '[' expr ']'
-recfield -> (NAME | '['exp']') = exp
-listfield -> exp
-field -> listfield | recfield
-constructor -> '{' [ field { sep field } [sep] ] '}'
-sep -> ',' | ';'
-parlist -> [ param { ',' param } ]
-body ->  '(' parlist ')' block END 
-explist -> expr { ',' expr }
-funcargs -> '(' [ explist ] ')'
-funcargs -> constructor
-funcargs -> STRING
-primaryexp -> NAME | '(' expr ')'
-suffixedexp -> primaryexp { '.' NAME | '[' exp ']' | ':' NAME funcargs | funcargs }
-simpleexp -> FLT | INT | STRING | NIL | TRUE | FALSE | ... |
-                  constructor | FUNCTION body | suffixedexp
-subexpr -> (simpleexp | unop subexpr) { binop subexpr }
-expr -> subexpr
-block -> statlist
-assignment -> suffixedexp restassign
-restassign -> ',' suffixedexp restassign | '=' explist
-cond -> exp
-label -> '::' NAME '::'
-whilestat -> WHILE cond DO block END
-repeatstat -> REPEAT block UNTIL cond
-forbody -> DO block
-fornum -> NAME = exp,exp[,exp] forbody
-forlist -> NAME {,NAME} IN explist forbody
-forstat -> FOR (fornum | forlist) END
-test_then_block -> [IF | ELSEIF] cond THEN block
-ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END
-attrib -> ['<' NAME '>']
-localstat -> LOCAL attrib NAME {',' attrib NAME} ['=' explist]
-funcname -> NAME {fieldsel} [':' NAME]
-funcstat -> FUNCTION funcname body
-retstat -> RETURN [explist] [';']
-breakstat -> BREAK
+
 stat -> funcstat
 stat -> assignment
 stat -> ';' # empty statement
@@ -1921,10 +1884,302 @@ stat -> DO block END
 stat -> forstat
 stat -> repeatstat
 stat -> localstat
-stat -> label
+stat -> labelstat
 stat -> retstat
 stat -> breakstat
 stat -> GOTO NAME
+
+funcstat -> FUNCTION funcname body
+funcname -> NAME {fieldsel} [':' NAME]
+body ->  '(' parlist ')' block END 
+fieldsel -> ['.' | ':'] NAME
+parlist -> [ param { ',' param } ]
+
+assignment -> suffixedexp restassign
+restassign -> ',' suffixedexp restassign | '=' explist
+suffixedexp -> primaryexp { '.' NAME | '[' expr ']' | ':' NAME funcargs | funcargs }
+primaryexp -> NAME | '(' expr ')'
+funcargs -> '(' [ explist ] ')'
+funcargs -> constructor
+funcargs -> STRING
+
+ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END
+cond -> expr
+block -> statlist
+
+whilestat -> WHILE cond DO block END
+
+forstat -> FOR (fornum | forlist) END
+fornum -> NAME = expr,expr[,expr] forbody
+forlist -> NAME {,NAME} IN explist forbody
+forbody -> DO block
+
+repeatstat -> REPEAT block UNTIL cond
+
+localstat -> LOCAL attrib NAME {',' attrib NAME} ['=' explist]
+attrib -> ['<' NAME '>']
+
+labelstat -> '::' NAME '::'
+
+retstat -> RETURN [explist] [';']
+breakstat -> BREAK
+
+explist -> expr { ',' expr }
+index -> '[' expr ']'
+subexpr -> (simpleexp | unop subexpr) { binop subexpr }
+simpleexp -> FLT | INT | STRING | NIL | TRUE | FALSE | ... | constructor | FUNCTION body | suffixedexp
+constructor -> '{' [ field { sep field } [sep] ] '}'
+field -> listfield | recfield
+recfield -> (NAME | '['expr']') = expr
+listfield -> expr
+sep -> ',' | ';'
+expr -> subexpr
+
+test_then_block -> [IF | ELSEIF] cond THEN block
+```
+
+Lua 语法分析器Parser的主函数，文法的分析首先从`statlist开始`
+
+```cpp
+LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
+                       Dyndata *dyd, const char *name, int firstchar) {
+  LexState lexstate;
+  FuncState funcstate;
+  LClosure *cl = luaF_newLclosure(L, 1);  /* create main closure */
+  setclLvalue2s(L, L->top, cl);  /* anchor it (to avoid being collected) */
+  luaD_inctop(L);
+  lexstate.h = luaH_new(L);  /* create table for scanner */
+  sethvalue2s(L, L->top, lexstate.h);  /* anchor it */
+  luaD_inctop(L);
+  funcstate.f = cl->p = luaF_newproto(L);
+  funcstate.f->source = luaS_new(L, name);  /* create and anchor TString */
+  luaC_objbarrier(L, funcstate.f, funcstate.f->source);
+  lexstate.buff = buff;
+  lexstate.dyd = dyd;
+  dyd->actvar.n = dyd->gt.n = dyd->label.n = 0;
+  luaX_setinput(L, &lexstate, z, funcstate.f->source, firstchar);  // 设置词法分析器的输入
+  mainfunc(&lexstate, &funcstate);
+  lua_assert(!funcstate.prev && funcstate.nups == 1 && !lexstate.fs);
+  /* all scopes should be correctly finished */
+  lua_assert(dyd->actvar.n == 0 && dyd->gt.n == 0 && dyd->label.n == 0);
+  L->top--;  /* remove scanner's table */
+  return cl;  /* closure is on the stack, too */
+}
+
+/*
+** compiles the main function, which is a regular vararg function with an
+** upvalue named LUA_ENV
+**编译main函数，这是一个常规vararg函数，带有
+**名为LUA_ENV的增值
+*/
+static void mainfunc (LexState *ls, FuncState *fs) {
+  BlockCnt bl;
+  Upvaldesc *env;
+  open_func(ls, fs, &bl);
+  setvararg(fs, 0);  /* main function is always declared vararg */
+  env = allocupvalue(fs);  /* ...set environment upvalue */
+  env->instack = 1;
+  env->idx = 0;
+  env->kind = VDKREG;
+  env->name = ls->envn;
+  luaX_next(ls);  /* read first token */  //读取第一个标记
+  statlist(ls);  /* parse main body */ // 开始语法分析
+  check(ls, TK_EOS);
+  close_func(ls);
+}
+```
+
+```cpp
+static void statlist (LexState *ls) {
+  /* statlist -> { stat [';'] } */
+  while (!block_follow(ls, 1)) {
+    if (ls->t.token == TK_RETURN) {
+      statement(ls);
+      return;  /* 'return' must be last statement */
+    }
+    statement(ls);
+  }
+}
+
+static void statement (LexState *ls) {
+  int line = ls->linenumber;  /* may be needed for error messages 错误消息可能需要的行信息 */
+  enterlevel(ls);
+  switch (ls->t.token) {
+    case ';': {  /* stat -> ';' (empty statement) */
+      luaX_next(ls);  /* skip ';' */
+      break;
+    }
+    case TK_IF: {  /* stat -> ifstat */
+      ifstat(ls, line);
+      break;
+    }
+    case TK_WHILE: {  /* stat -> whilestat */
+      whilestat(ls, line);
+      break;
+    }
+    case TK_DO: {  /* stat -> DO block END */
+      luaX_next(ls);  /* skip DO */
+      block(ls);
+      check_match(ls, TK_END, TK_DO, line);
+      break;
+    }
+    case TK_FOR: {  /* stat -> forstat */
+      forstat(ls, line);
+      break;
+    }
+    case TK_REPEAT: {  /* stat -> repeatstat */
+      repeatstat(ls, line);
+      break;
+    }
+    case TK_FUNCTION: {  /* stat -> funcstat */
+      funcstat(ls, line);
+      break;
+    }
+    case TK_LOCAL: {  /* stat -> localstat */
+      luaX_next(ls);  /* skip LOCAL */
+      if (testnext(ls, TK_FUNCTION))  /* local function? */
+        localfunc(ls);
+      else
+        localstat(ls);
+      break;
+    }
+    case TK_DBCOLON: {  /* stat -> label */
+      luaX_next(ls);  /* skip double colon */
+      labelstat(ls, str_checkname(ls), line);
+      break;
+    }
+    case TK_RETURN: {  /* stat -> retstat */
+      luaX_next(ls);  /* skip RETURN */
+      retstat(ls);
+      break;
+    }
+    case TK_BREAK: {  /* stat -> breakstat */
+      breakstat(ls);
+      break;
+    }
+    case TK_GOTO: {  /* stat -> 'goto' NAME */
+      luaX_next(ls);  /* skip 'goto' */
+      gotostat(ls);
+      break;
+    }
+    default: {  /* stat -> func | assignment */
+      exprstat(ls);
+      break;
+    }
+  }
+  lua_assert(ls->fs->f->maxstacksize >= ls->fs->freereg &&
+             ls->fs->freereg >= luaY_nvarstack(ls->fs));
+  ls->fs->freereg = luaY_nvarstack(ls->fs);  /* free registers */
+  leavelevel(ls);
+}
+```
+
+`whilestat`示例
+
+```cpp
+static void whilestat (LexState *ls, int line) {
+  /* whilestat -> WHILE cond DO block END */
+  FuncState *fs = ls->fs;
+  int whileinit;
+  int condexit;
+  BlockCnt bl;
+  luaX_next(ls);  /* skip WHILE 跳过while关键字(前提是在上一层函数调用中发现了while) */
+  whileinit = luaK_getlabel(fs);
+  condexit = cond(ls);
+  enterblock(fs, &bl, 1);
+  checknext(ls, TK_DO);
+  block(ls);
+  luaK_jumpto(fs, whileinit);
+  check_match(ls, TK_END, TK_WHILE, line);
+  leaveblock(fs);
+  luaK_patchtohere(fs, condexit);  /* false conditions finish the loop 
+                                      错误条件结束循环 */
+}
+
+static int cond (LexState *ls) {
+  /* cond -> exp */
+  expdesc v;
+  expr(ls, &v);  /* read condition 读取条件 */
+  if (v.k == VNIL) v.k = VFALSE;  /* 'falses' are all equal here “假”在这里都相等 */
+  luaK_goiftrue(ls->fs, &v);
+  return v.f;
+}
+
+static void block (LexState *ls) {
+  /* block -> statlist */
+  FuncState *fs = ls->fs;
+  BlockCnt bl;
+  enterblock(fs, &bl, 0);
+  statlist(ls);
+  leaveblock(fs);
+}
+```
+
+`expr`示例
+
+```cpp
+static void expr (LexState *ls, expdesc *v) {
+  subexpr(ls, v, 0);
+}
+
+/*
+** Priority table for binary operators.
+二进制运算符的优先级表。
+*/
+static const struct {
+  lu_byte left;  /* left priority for each binary operator  每个二进制运算符的左优先级 */
+  lu_byte right; /* right priority 游优先级 */
+} priority[] = {  /* ORDER OPR */
+   {10, 10}, {10, 10},           /* '+' '-' */
+   {11, 11}, {11, 11},           /* '*' '%' */
+   {14, 13},                  /* '^' (right associative 右结合) */
+   {11, 11}, {11, 11},           /* '/' '//' */
+   {6, 6}, {4, 4}, {5, 5},   /* '&' '|' '~' */
+   {7, 7}, {7, 7},           /* '<<' '>>' */
+   {9, 8},                   /* '..' (right associative 右结合) */
+   {3, 3}, {3, 3}, {3, 3},   /* ==, <, <= */
+   {3, 3}, {3, 3}, {3, 3},   /* ~=, >, >= */
+   {2, 2}, {1, 1}            /* and, or */
+};
+
+#define UNARY_PRIORITY	12  /* priority for unary operators 一元运算符的优先级 */
+
+
+/*
+** subexpr -> (simpleexp | unop subexpr) { binop subexpr }
+** where 'binop' is any binary operator with a priority higher than 'limit'
+其中 “binop” 是优先级高于“限制”的任何二进制运算符
+*/
+static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
+  BinOpr op;
+  UnOpr uop;
+  enterlevel(ls);
+  uop = getunopr(ls->t.token);
+  if (uop != OPR_NOUNOPR) {  /* prefix (unary) operator? 前缀（一元）运算符？ */
+    int line = ls->linenumber;
+    luaX_next(ls);  /* skip operator 跳过运算符 */
+    subexpr(ls, v, UNARY_PRIORITY);
+    luaK_prefix(ls->fs, uop, v, line);
+  }
+  else simpleexp(ls, v);
+  /* expand while operators have priorities higher than 'limit' 
+  扩展，而操作员的优先级高于“限制” */
+  op = getbinopr(ls->t.token);
+  while (op != OPR_NOBINOPR && priority[op].left > limit) {
+    expdesc v2;
+    BinOpr nextop;
+    int line = ls->linenumber;
+    luaX_next(ls);  /* skip operator 跳过运算符 */
+    luaK_infix(ls->fs, op, v);
+    /* read sub-expression with higher priority 
+    读取具有更高优先级的子表达式 */
+    nextop = subexpr(ls, &v2, priority[op].right);
+    luaK_posfix(ls->fs, op, v, &v2, line);
+    op = nextop;
+  }
+  leavelevel(ls);
+  return op;  /* return first untreated operator 返回第一个未经处理的运算符 */
+}
 ```
 
 <!--TODO-->
