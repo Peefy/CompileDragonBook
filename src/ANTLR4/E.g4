@@ -1,8 +1,5 @@
 grammar E;
 
-options{ 
-    output=AST;
-} 
 program : statement + ; 
 statement: (expression | VAR '=' expression) ';' ; 
 expression : (multExpr (('+' |'-' ) multExpr)*) | STRING; 
