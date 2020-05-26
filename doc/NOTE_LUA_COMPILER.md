@@ -1872,7 +1872,7 @@ LUAI_FUNC LClosure *luaY_parser (lua_State *L, ZIO *z, Mbuffer *buff,
 
 Lua是递归下降语法分析，Lua的文法如下
 
-```txt
+```bnf
 statlist -> { stat [';'] }
 
 stat -> funcstat

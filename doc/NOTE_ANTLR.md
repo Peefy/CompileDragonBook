@@ -3,6 +3,27 @@
 
 ANTLR（ANother Tool for Language Recognition 另一种语言识别工具）是功能强大的解析器生成器，用于读取，处理，执行或翻译结构化文本或二进制文件。 它被广泛用于构建语言，工具和框架。 ANTLR通过语法生成可以构建和遍历语法树的语法分析器。
 
+一门语言的正式描述称为**语法(grammer)**，ANTLR能够为该语言生成一个语法分析器，并自动建立语法分析树----一种描述语法与输入文本匹配关系的数据结构。ANTLR也能够自动生成树的遍历器，这样就可以访问树中的节点，执行自定义的业务逻辑代码。
+
+## ANTLR4的新特点
+
+ANTLR4极大地简化了匹配某些句法结构(如编程语言的算术表达式)所需的语法规则。长久以来，处理表达式都是ANTLR语法以及手工编写的递归下降语法分析器的难题。识别表达式最自然的语法对于传统的自顶向下的语法分析器生成器(如ANTLR3)是无效的，但是ANTLR4可以使用如下的左递归表达式:
+
+```antlr
+expr : expr '*' expr  // 匹配乘法
+     | expr '+' expr  // 匹配加法
+     | INT            // 匹配简单的整数因子
+     ;
+```
+
+类似`expr`的自引用规则是递归的，更准确地说，是**左递归(left recursive)**的，因为它的至少一个备选分支直接引用了它自己。
+
+ANTLR4自动将类似expr的左递归规则重写成了等价的非左递归形式。唯一的约束是左递归必须是直接的，也就是说直接引用自身。一条规则不能匹配另外一条规则。
+
+ANTLR生成的语法分析器能够自动建立语法分析树的视图，其他程序可以遍历此树，并在所需处理的结构处触发回调函数。在先前的ANTLR3中，用户需要补充语法来创建树。ANTLR4还提供了自动生成语法树遍历器的实现：监听器(listener)或者访问器(visitor)。监听器与在XML文档的解析过程中响应SAX事件的处理器相似。
+
+ANTLR的`LL(*)`语法分析策略不如ANTLR4的`ALL(*)`强大，所以ANTLR3为了能够正确识别输入的文本，有时候不得不进行回溯。
+
 ## Quick Start
 
 * OS X
@@ -26,6 +47,44 @@ $ alias grun='java org.antlr.v4.gui.TestRig'
 ```
 
 ## VS Code ANTLR4 插件
+
+## Hello ANTLR4
+
+```antlr
+// Define a grammar called Hello 定义一个语法名字：Hello
+grammar Hello;
+r  : 'hello' ID ;         // match keyword hello followed by an identifier 匹配关键字hello，后跟标识符
+ID : [a-z]+ ;             // match lower-case identifiers 匹配全是小写字母的标识符
+WS : [ \t\r\n]+ -> skip ; // skip spaces, tabs, newlines  跳过空格，制表符，换行符
+```
+
+然后使用`antlr`和`grun`别名来运行测试它,`grun`相当于一个主程序
+
+```sh
+antlr4 Hello.g4
+javac *.java
+grun Hello r -tokens
+```
+
+或者打印出LISP风格文本格式的语法分析树`
+
+```sh
+grun Hello r -tree 
+hello parrt
+```
+
+`grun`的命令行参数选项:
+
+* ****-
+* ****-
+* ****-
+* ****-
+* ****-
+* ****-
+* ****-
+* ****-
+
+<!-- ANTLR 权威指南中文版 看到了28页 -->
 
 ## ANTLR 语法
 
@@ -113,16 +172,6 @@ expr, simpleDeclarator, d2, header_file // rule names
 * visitor方法可以直接返回值，返回值的类型必须一致，不需要使用map这种节点间传值方式，效率高
 
 ## ANTLR4 示例
-
-### Hello ANTLR4
-
-```antlr
-// Define a grammar called Hello 定义一个语法名字：Hello
-grammar Hello;
-r  : 'hello' ID ;         // match keyword hello followed by an identifier 匹配关键字hello，后跟标识符
-ID : [a-z]+ ;             // match lower-case identifiers 匹配全是小写字母的标识符
-WS : [ \t\r\n]+ -> skip ; // skip spaces, tabs, newlines  跳过空格，制表符，换行符
-```
 
 ### 简单计算器
 
