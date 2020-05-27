@@ -48,6 +48,91 @@ $ alias grun='java org.antlr.v4.gui.TestRig'
 
 ## VS Code ANTLR4 插件
 
+## ANTLR 语法
+
+```antlr
+/** Optional javadoc style comment */
+grammar Name; 
+options {...}
+import ... ;
+
+tokens {...}
+channels {...} // lexer only
+@actionName {...}
+
+rule1 // parser and lexer rules, possibly intermingled
+...
+ruleN
+```
+
+* **grammer**-声明语法头，类似于Java的定义
+* **options**-选项，如语言选项，输出选项，回溯选项，记忆选项等等
+* **@actionName**-动作（Actions）实际上是用目标语言写成的、嵌入到规则中的代码（以花括号包裹）。它们通常直接操作输入的标号，但是他们也可以用来调用相应的外部代码。常用属性或动作说明：
+1. `@header { package com.zetyun.aiops.antlr.test; }`这个动作很有用，即在运行脚本后，生成的类中自动带上这个包路径，避免了手动加入的麻烦。
+2. `@members { int i; public TParser(TokenStream input, int foo) { this(input); i = foo; }}`
+3. `@after {System.out.println("after matching rule; before finally");}`
+* **rule**-文法的核心，表示规则，以 `:` 开始， `;` 结束， 多规则以 `|` 分隔。
+
+```antlr
+ID : [a-zA-Z0-9|'_']+ ;    //数字 
+STR:'\'' ('\'\'' | ~('\''))* '\''; 
+WS: [ \t\n\r]+ -> skip ; // 系统级规则 ，即忽略换行与空格
+
+sqlStatement
+    : ddlStatement 
+    | dmlStatement     | transactionStatement
+    | replicationStatement     | preparedStatement
+    | administrationStatement     | utilityStatement
+    ;
+```
+
+## ANTLR 注释
+
+* 单行、多行、javadoc风格
+* javadoc风格只能在开头使用
+
+```antlr
+/** 
+ * This grammar is an example illustrating the three kinds
+ * of comments.
+ */
+grammar T;
+
+/* a multi-line
+  comment
+*/
+
+/** This rule matches a declarator for my language */
+
+decl : ID ; // match a variable name
+```
+
+## ANTLR 标识符
+
+* 符号(Token)名大写开头
+* 解析规则(Parser rule)名小写开头,后面可以跟字母、数字、下划线
+
+```antlr
+ID, LPAREN, RIGHT_CURLY // token names
+expr, simpleDeclarator, d2, header_file // rule names
+```
+
+## ANTLR 遍历模式
+
+### Listener (观察者模式，通过结点监听，触发处理方法)
+
+* 程序员不需要显示定义遍历语法树的顺序，实现简单
+* 缺点，不能显示控制遍历语法树的顺序
+* 动作代码与文法产生式解耦，利于文法产生式的重用
+* 没有返回值，需要使用map、栈等结构在节点间传值
+
+### Visitor (访问者模式，主动遍历)
+
+* 程序员可以显示定义遍历语法树的顺序
+* 不需要与antlr遍历类ParseTreeWalker一起使用，直接对tree操作
+* 动作代码与文法产生式解耦，利于文法产生式的重用
+* visitor方法可以直接返回值，返回值的类型必须一致，不需要使用map这种节点间传值方式，效率高
+
 ## Hello ANTLR4
 
 ```antlr
@@ -275,7 +360,7 @@ $ EOF
 
 用自然语言表述，语法分析树就是，“输入的是一个由一对花括号包裹的三个值组成的初始化语句”
 
-*注意：文件结束符(end of file EOF)*在类UNIX系统上的输入方法是`Ctrl+D`，在Windows上的方法是`Ctrl+Z`
+*注意：文件结束符(end of file EOF)在类UNIX系统上的输入方法是`Ctrl+D`，在Windows上的方法是`Ctrl+Z`*
 
 ### 将生成的语法分析器与Java程序集成
 
@@ -331,92 +416,266 @@ System.out.println();
 
 ## ANTLR 快速指南
 
-<!-- ANTLR 权威指南中文版 看到了73页 -->
+### 匹配算术表达式的语言
 
-## ANTLR 语法
+第一个语法用于构建一个简单的计算器，其对算术表达式的处理具有十分重要的意义，因为它们很常见。为简单起见，只允许基本的算术操作符(加减乘除)、圆括号、整数以及变量出现。例子中的算术表达式限制浮点数的使用，只允许整数出现。
 
-```antlr
-/** Optional javadoc style comment */
-grammar Name; 
-options {...}
-import ... ;
+下面的示例包含了本语言的全部特性：
 
-tokens {...}
-channels {...} // lexer only
-@actionName {...}
-
-rule1 // parser and lexer rules, possibly intermingled
-...
-ruleN
+```expr
+193
+a = 5
+b = 6
+a+b*2
+(1+2)*3
 ```
 
-* **grammer**-声明语法头，类似于Java的定义
-* **options**-选项，如语言选项，输出选项，回溯选项，记忆选项等等
-* **@actionName**-动作（Actions）实际上是用目标语言写成的、嵌入到规则中的代码（以花括号包裹）。它们通常直接操作输入的标号，但是他们也可以用来调用相应的外部代码。常用属性或动作说明：
-1. `@header { package com.zetyun.aiops.antlr.test; }`这个动作很有用，即在运行脚本后，生成的类中自动带上这个包路径，避免了手动加入的麻烦。
-2. `@members { int i; public TParser(TokenStream input, int foo) { this(input); i = foo; }}`
-3. `@after {System.out.println("after matching rule; before finally");}`
-* **rule**-文法的核心，表示规则，以 `:` 开始， `;` 结束， 多规则以 `|` 分隔。
+用自然语言来说，表达式语言组成的程序就是一系列语句，每个语句都由换行符终止。一个语句可以是一个表达式、一个赋值语句或者是一个空行。下面是对应的ANTLR语法：
 
 ```antlr
-ID : [a-zA-Z0-9|'_']+ ;    //数字 
-STR:'\'' ('\'\'' | ~('\''))* '\''; 
-WS: [ \t\n\r]+ -> skip ; // 系统级规则 ，即忽略换行与空格
+grammar Expr;
+/* 起始规则，语法分析的起点 */
+prog: stat+;
+stat: expr NEWLINE
+    | ID '=' expr NEWLINE
+    | NEWLINE
+    ;
+expr: expr ('*'|'/') expr
+    | expr ('+'|'-') expr
+    | INT
+    | ID
+    | '(' expr ')'
+    ;
+ID:  [a-zA-Z]+;     // 匹配标识符
+INT: [0-9]+;        // 匹配整数
+NEWLINE: 'r'? '\n'; // 告诉语法分析器一个新行的开始(即语句终止标志)
+WS:  [\t]+ -> skip; // 丢弃空白字符
+```
 
-sqlStatement
-    : ddlStatement 
-    | dmlStatement     | transactionStatement
-    | replicationStatement     | preparedStatement
-    | administrationStatement     | utilityStatement
+* 语法包含一系列描述语言结构的规则。这些规则既包括类似`stat`和`expr`的描述语法结构的规则，也包括描述标识符和整数之类的词汇符号(词法符号)的规则。
+* 语法分析器的规则以小写字母开头
+* 词法分析器的规则以大写字母开头
+* 使用`|`来分隔同一个语言规则的若干备选分支，使用**圆括号**把一些符号组合成子规则。例如，子规则`('*'|'/')`匹配一个乘法符号或者一个除法符号。
+
+**ANTLR4的最重要的新功能之一就是，它能够处理(大部分情况下)左递归规则**。左递归规则是指这样的语言规则：在某个备选分支的起始位置调用了自身。例如，在上述语法中，expr规则的备选分支出现了自身expr规则。使用这种方式指定算术表达式远比传统的自顶向下语法分析器策略简单。在传统的语法分析策略中，需要为运算符的每种优先级编写一条规则。
+
+词法符号定义的标记和正则表达式的元字符非常相似。
+
+* `'+'`-加号代表前面的字符必须至少出现一次（1次或多次）。
+* `'*'`-星号代表字符可以不出现，也可以出现一次或者多次（0次、或1次、或多次）。
+* `'?'`-问号代表前面的字符最多只可以出现一次（0次、或1次） 
+
+*注意：在WS词法规则后面的`-> skip`操作是一条指令，告诉词法分析器匹配并丢弃空白字符。*通过使用正式的ANTLR标记，而非嵌入一段代码来告诉词法分析器忽略这些字符，就能避免语法和某种特定的目标语言绑定。
+
+### 利用访问器构建一个计算器
+
+可以使用ANTLR4的语法分析树访问器和其他的遍历器来实现语言类应用程序，从而保持语法本身的整洁。
+
+首先给备选分支加上标签：
+
+```antlr
+grammar LabeledExpr;
+/* 起始规则，语法分析的起点 */
+prog: stat+;
+stat: expr NEWLINE        # printExpr
+    | ID '=' expr NEWLINE # assign
+    | NEWLINE             # blank
+    ;
+expr: expr op=('*'|'/') expr # MulDiv
+    | expr op=('+'|'-') expr # AddSub
+    | INT                    # int
+    | ID                     # id
+    | '(' expr ')'           # parens
+    ;
+ID:  [a-zA-Z]+;     // 匹配标识符
+INT: [0-9]+;        // 匹配整数
+NEWLINE: 'r'? '\n'; // 告诉语法分析器一个新行的开始(即语句终止标志)
+WS:  [ \t]+ -> skip; //丢弃制表符和空白符
+MUL:  '*';
+DIV:  '/';
+ADD:  '+';
+SUB:  '-';
+```
+
+```java
+import java.util.HashMap;
+import java.util.Map;
+
+public class EvalVisitor extends LabledExprBaseVisitor<Integer> {
+    Map<String, Integer> memory = new HashMap<String, Integer>();
+
+    /* ID '=' expr NEWLINE */
+    @Override
+    public Integer visitAssign(LabeledExprParser.AssignContext ctx) {
+        String id = ctx.ID().getText();
+        int value = visit(ctx.expr());
+        memory.put(id, value);
+        return value;
+    }
+
+    /* expr NEWLINE */
+    @Override
+    public Integer visitPrintExpr(LabeledExprParser.AssignContext ctx) {
+        Integer value = visit(ctx.expr());
+        System.out.println(value);
+        return 0;
+    }
+
+    /* ID */
+    @Override
+    public Integer visitId(LabeledExprParser.AssignContext ctx) {
+        String id = ctx.ID().getText();
+        if (memory.containsKey(id))
+            return memory.get(id);
+        return 0;
+    }
+    
+    /* expr op=('*'|'/') expr */
+    @Override
+    public Integer visitMulDiv(LabeledExprParser.AssignContext ctx) {
+        int left = visit(ctx.expr(0));
+        int right = visit(ctx.expr(1));
+        if (ctx.op.getType() == LabledExprParser.MUL) 
+            return left * right;
+        return left / right;
+    }
+
+    /* expr op=('+'|'-') expr */
+    @Override
+    public Integer visitMulDiv(LabeledExprParser.AssignContext ctx) {
+        int left = visit(ctx.expr(0));
+        int right = visit(ctx.expr(1));
+        if (ctx.op.getType() == LabledExprParser.ADD) 
+            return left + right;
+        return left - right;
+    }
+
+}
+```
+
+### 利用监听器构建一个翻译程序
+
+将一个Java类中的全部方法抽取出来，生成一个接口文件，保留方法签名中的空白字符和注释。
+
+部分`Java.g4`示例
+
+```antlr
+classDeclaration :
+    'class' Identifier typeParameters? ('extends' type)?
+    ('implements' typeList)?
+    classBody;
+methodDeclaration :
+    type Identifier formalParameters ('[' ']')* methodDelarationRest
+    | 'void' Identifier formalParameters methodDelarationRest
     ;
 ```
 
-## ANTLR 注释
+基本思想是，在类定义的起始位置打印出接口定义，然后在类定义的结束位置打印出`}`。在遇到每个方法定义时，将会抽取出它的签名。
 
-* 单行、多行、javadoc风格
-* javadoc风格只能在开头使用
+访问器和监听器机制表现出色，它们使语法分析过程和程序本身高度分离。尽管如此，有些时候，还是需要额外的灵活性和可操控性。
 
-```antlr
-/** 
- * This grammar is an example illustrating the three kinds
- * of comments.
- */
-grammar T;
+### 定制语法分析过程
 
-/* a multi-line
-  comment
-*/
+监听器和访问器机制是一个创举，这使得自定义的程序代码和语法本身分离开来，让语法更具可读性，避免了将语法和特定的程序混杂子一起。不过，为了灵活性和可操控性，可以直接将代码片段(动作)嵌入语法中。这些动作将被拷贝到ANTLR自动生成的递归下降语法分析器的代码中。
 
-/** This rule matches a declarator for my language */
+将会看到如何实现特殊的动作，叫做**语义判定(samantic predicate)**,它能够动态地开启或者关闭部分语法。
 
-decl : ID ; // match a variable name
-```
+#### 在语法中嵌入任意动作
 
-## ANTLR 标识符
-
-* 符号(Token)名大写开头
-* 解析规则(Parser rule)名小写开头,后面可以跟字母、数字、下划线
+如果不想承担建立语法分析树的开销，可以在语法分析的过程中计算并打印结果。另一个方案是，在“表达式语法”中嵌入一些代码。
 
 ```antlr
-ID, LPAREN, RIGHT_CURLY // token names
-expr, simpleDeclarator, d2, header_file // rule names
+grammar Rows;
+
+@parser::members {
+    int col;
+    public RowsParser(TokenStream input, int col) {
+        // 自定义构造器
+        this(input);
+        this.col = col
+    }
+}
+
+file: (row NL)+;
+
+row
+locals [int i = 0]
+    : (STUFF
+    {
+        $i++;
+        if ($i == col) System.out.println($STUFF.text);
+    }
+    )+
+    ;
+
+TAB : '\t' -> skip; // 匹配但是不将其传递给语法分析器
+NL :  '\r'? '\n';   // 匹配并将其传递给语法分析器
+STUFF ~[\t\r\n]+    // 匹配除tab符和换行符之外的任何字符
 ```
 
-## ANTLR 遍历模式
+语义判定
 
-### Listener (观察者模式，通过结点监听，触发处理方法)
+```antlr
+grammar Data;
 
-* 程序员不需要显示定义遍历语法树的顺序，实现简单
-* 缺点，不能显示控制遍历语法树的顺序
-* 动作代码与文法产生式解耦，利于文法产生式的重用
-* 没有返回值，需要使用map、栈等结构在节点间传值
+file : group+
+group: INT sequence[$INT.int];
+sequence[int n]
+locals [int i = l;]
+: ( {$i<=$n}? INT {$i++} )* // 匹配n个函数
+;
+INT : [0-9]+;
+WS : [ \t\n\r] // 丢弃所有空白字符
+```
 
-### Visitor (访问者模式，主动遍历)
+### 词法分析特性
 
-* 程序员可以显示定义遍历语法树的顺序
-* 不需要与antlr遍历类ParseTreeWalker一起使用，直接对tree操作
-* 动作代码与文法产生式解耦，利于文法产生式的重用
-* visitor方法可以直接返回值，返回值的类型必须一致，不需要使用map这种节点间传值方式，效率高
+#### 孤岛语法：处理相同文件中的不同格式
+
+事实上，有很多常见的文件格式包含多重语言。例如，Java文档注释中的`@author`标签等内容使用的是一种特殊的微型语言；在注释之外的一切内容都是Java代码。需要将模版语言表达式之外的文本按照不同的方式进行处理，这种情况通常称为孤岛语法。
+
+ANTLR提供了一个众所周知的词法分析器特性，称为**词法分析模式(lexical mode)**，使能够方便地处理混杂着不同格式数据的文件。它的基本思想是，当词法分析器看到一些特殊的“哨兵”字符序列时，执行不同模式的切换。
+
+XML是个很好的例子。一个XML解析器除了标签和实体转义时(例如`&pound;`)之外的东西全部当作普通文本。当看到`<`时，词法分析器会切换到“标签内部”模式；当看到`>`或者`/>`时，它就切换回默认模式。
+
+```antlr
+lexer grammar XMLLexer;
+
+// 默认的“模式”，所有在标签之外的东西
+OPEN  : '<'   -> pushMode(INSIDE);
+COMMENT :  '<!--' .*? '-->'  -> skip;
+EntityRef: '&' [a-z]+ ';' ;
+TEXT   :  ~('<'|'&')+ ;  // 匹配任意除<和&之外的16位字符
+
+// ------- 所有在标签之内的东西 ------
+mode INSIDE;
+CLOSE  :  '>' -> popMode;
+SLASH_CLOSE :  '/>' -> popMode;
+EQUALS  :  '=' ;
+STRING :    '"'  .*? '"' ;
+SlashName  :  '/' Name;
+Name  :  ALPHA (ALPHA|DIGIT)*;
+S : [ \t\r\n] -> skip;
+
+fragment
+ALPHA : [a-zA-Z];
+
+fragment
+DIGIT  : [0-9];
+```
+
+如果需要令测试组件只运行词法分析器而不运行语法分析器，可以指定参数为语法名加上一个特殊的规则名tokens。
+
+#### 重写输入流
+
+构建一个小工具，能够修改Java源代码并插入`java.io.Serializable`使用的序列化版本标识符(serialVersionUID,类似Eclipse的自动生成功能)。简单的做法是：在原先的词法符号流中插入一个适当代表常量字段的词法符号，然后打印出修改后的输入流。
+
+在监听器的实现中，在类定义的起始位置触发一个插入操作：
+
+```java
+```
+
+<!-- ANTLR 权威指南中文版 看到了109页 -->
 
 ## ANTLR4 示例
 
@@ -458,9 +717,6 @@ import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.tree.ParseTree;
-
-import com.zetyun.aiops.core.math.MathLexer;
-import com.zetyun.aiops.core.math.MathParser;
 
 public class Math {
     public static void main(String[] args) {
