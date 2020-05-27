@@ -66,7 +66,7 @@ javac *.java
 grun Hello r -tokens
 ```
 
-或者打印出LISP风格文本格式的语法分析树`
+或者打印出LISP风格文本格式的语法分析树
 
 ```sh
 grun Hello r -tree 
@@ -228,9 +228,110 @@ ANTLR会提供访问器接口和一个默认实现类，只关注感兴趣的方
 
 ## 入门的ANTLR项目
 
+比如识别一些像是`{1, 2, 3}`和`{1, {2, 3}, 4}`这样的花括号括起来语句。
 
+### ANTLR工具、运行库以及自动生成的代码
 
-<!-- ANTLR 权威指南中文版 看到了55页 -->
+在ANTLR的jar包中存在两个关键部分：ANTLR工具和ANTLR运行库(运行时语法分析)API。通常，对一个语法运行ANTLR时，指的是运行ANTLR工具，即`org.antlr.v4.Tool`类来生成一些代码(语法分析器和词法分析器)，它们能够识别使用这份语法代表的语言所写成的语句。词法分析器将输入的字符流分解为词法符号序列，然后将它们传递给能够进行语法检查的语法分析器。运行库是一个由若干类和方法组成的库，这些类和方法是自动生成的代码（如Parser,Lexer和Token）运行所必须的。因此，完成工作的一般步骤是：首先对一个语法运行ANTLR，然后将生成的代码与jar包中的运行库一起编译，最后将编译好的代码和运行库放在一起运行。
+
+构建一个语言类应用程序的第一步是创建一个能够描述这种语言的语法(即合法语句结构的集合)的语法。
+
+```antlr
+grammar ArrayInit;
+
+/* 一条名为init的规则，它匹配一对花括号中的、逗号分隔的value */
+init : '{' value (',' value)*  '}';
+/* 一个value可以是嵌套的花括号结构，也可以是一个简单的整数，即INT词法符号 */
+value : init
+      | INT
+      ;
+INT:  [0-9]+;              // 定义词法符号INT，它由一个或多个数字组成
+WS:   [\t\r\n]+ -> skip;   // 定义词法规则“空白符号”，丢弃之
+```
+
+ANTLR语法比正则表达式功能更强大，实际上，由于嵌套的花括号结构的存在，正则表达式无法识别这样的初始化语句。正则表达式没有存储的概念，它们无法记住之前匹配过的额输入，因此，它们不能将左右花括号正确配对。
+
+### 测试生成的语法生成器
+
+```sh
+$ grun ArrayInit init -tokens 
+$ {99, 3, 451}
+$ EOF
+```
+
+或者
+
+```sh
+$ grun ArrayInit init -tree
+$ {99, 3, 451}
+$ EOF
+```
+
+```sh
+$ grun ArrayInit init -gui
+$ {99, 3, 451}
+$ EOF
+```
+
+用自然语言表述，语法分析树就是，“输入的是一个由一对花括号包裹的三个值组成的初始化语句”
+
+*注意：文件结束符(end of file EOF)*在类UNIX系统上的输入方法是`Ctrl+D`，在Windows上的方法是`Ctrl+Z`
+
+### 将生成的语法分析器与Java程序集成
+
+```java
+import org.antlr.v4.runtime.*;
+import org.antlr.v4.runtime.tree.*;
+
+public class Test {
+    public static void main(String[] args) throws Exception {
+        ANTLRInputStream input = new ANTLRInputStream(System.in);
+        ArrayInitLexer lexer = new ArrayInitLexer(input);
+        CommonTokenStrem tokens = new CommonTokenStream(lexer);
+        ArrayInitParser lexer = new ArrayInitParser(tokens);
+        ParseTree tree = parser.init();
+        System.out.println(tree.toStringTree(parser));
+    }
+}
+```
+
+### 构建一个语言类应用
+
+可以使用ANTLR监听器在语法树的遍历中调用回调函数，比如把`{99,3,451}`的short数组翻译成`\u0063\u0003\u01c3`。
+
+最简单的方式是使用ANTLR内置的语法分析树遍历器进行深度优先遍历，然后在它触发的一系列回调函数中进行适当的操作。这样的监听器非常类似于图形界面程序控件上的回调函数。
+
+```java
+public class ShortToUnicodeString extends ArrayInitBaseListener {
+    @Override
+    public void enterInit(ArrayInitPaser.InitContext ctx) {
+        System.out.print('\"');
+    }
+
+    @Override
+    public void exitInit(ArrayInitPaser.InitContext ctx) {
+        System.out.print('\"');
+    }
+
+    @Override
+    public void enterValue(ArrayInitPaser.ValueContext ctx) {
+        int value = Integer.valueOf(ctx.INT().getText());
+        System.out.printf('\\u%04x', value);
+    }
+}
+```
+
+然后在主程序中调用：
+
+```java
+ParseTreeWalker walker = new ParseTreeWalker();
+walker.walk(new ShortToUnicodeString(), tree);
+System.out.println();
+```
+
+## ANTLR 快速指南
+
+<!-- ANTLR 权威指南中文版 看到了73页 -->
 
 ## ANTLR 语法
 
