@@ -43,4 +43,3 @@ cleanimg:
 cleang4:
 	-@$(RM) ./src/ANTLR4/.antlr/*.*
 	-@$(RM) ./src/ANTLR4/.antlr/
-
