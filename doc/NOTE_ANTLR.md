@@ -670,12 +670,45 @@ DIGIT  : [0-9];
 
 构建一个小工具，能够修改Java源代码并插入`java.io.Serializable`使用的序列化版本标识符(serialVersionUID,类似Eclipse的自动生成功能)。简单的做法是：在原先的词法符号流中插入一个适当代表常量字段的词法符号，然后打印出修改后的输入流。
 
+```java
+// 打印除修改后的词法符号流
+System.out.println(extractor.rewriter.getText());
+```
+
 在监听器的实现中，在类定义的起始位置触发一个插入操作：
 
 ```java
+import org.antlr.v4.runtime.TokenStrem;
+import org.antlr.v4.runtime.TokenStremRewriter;
+
+public class InsertSerialIDListener extends JavaBaseListener {
+    TokenStreamRewriter rewiter;
+    public InsertSerialIDListener(TokenStream tokens) {
+        rewiter = new TokenStreamRewriter(tokens);
+    }
+
+    @Override
+    public void enterClassBody(JavaParser.ClassBodyContext ctx) {
+        String field = "\n\tpublic static final long serialVersionUID = 1L;"
+        rewriter.insertAfter(ctx.start, field);
+    }
+}
 ```
 
-<!-- ANTLR 权威指南中文版 看到了109页 -->
+其中的关键之处在于，`TokenStreamRewriter`对象实际上修改的是词法符号流的“视图”而非词法符号流本身。它认为所有对修改方法的调用都只是一个“指令”，然后将这些修改放入一个队列，在未来词法符号流被重新渲染为文本时，这些修改才会被执行。每次调用`getText()`方法时，`rewriter`对象都会执行上述队列中的指令。
+
+#### 将词法符号流送入不同通道
+
+使用传统方法很难达到保留方法签名中的空白字符和注释，对于大多数语法，词法分析器是可以忽略空白字符和注释的。如果不想让空白字符和注释在语法中到处都是，可以让词法分析器丢弃它们。忽略却保留注释和空白的方法是将词法符号送入一个“隐藏通道”。
+
+```antlr
+COMMENT
+    : '/*' .*? '*/' -> channel(HIDDEN)   //匹配 '/*' 和 '*/' 之间的任何东西 
+    ;
+WS  : [ \r\t\u000C\n]+ -> channel(HIDDEN)
+```
+
+<!-- ANTLR 权威指南中文版 看到了111页 -->
 
 ## ANTLR4 示例
 
