@@ -1307,7 +1307,324 @@ WS : [ \t\n\r]+ -> skip;
 
 DOT是一门声明式编程语言，主要用于描述网络图、树或者状态机之类的图形。它是一种应用广泛的图形工具，例如，ANTLR的-atn选项就用DOT来产生可视化的状态机。
 
-<!-- ANTLR 权威指南中文版 看到了176页 -->
+一个dot的源代码：
+
+```dot
+digraph G {
+    rankdir=LR;
+    main [shape=box];
+    main -> f -> g;         // main 调用f，f调用g
+    f -> f [style=dotted];  // f是递归的
+    f -> h;                 // f调用了h
+}
+```
+
+```dot
+digraph G { n -> sw; }
+```
+
+DOT语法指南中包含了几乎可以直接使用的句法规则。
+
+#### DOT语言的语法规则
+
+```antlr
+grammar DOT:
+graph : STRICT (GRAPH | DIGRAPH) id? '{' stmt list '}' ;
+stmt_list : (stmt ';'? )*;
+stmt : node_stmt 
+     | edge_stmt
+     | attr stmt
+     | id '=' id
+     | subgraph
+     ;
+attr_stmt : (GRAPH | NODE | EDGE) attr list;
+attr_list : ('[' a_list ']')+;
+a_list    : (id ('=' id)? ','?)+ ;
+edge_stmt : (node_id | subgraph) edgeRHS attr_list?;
+edgeRHS   : (edgeop (node_id | subgraph))+ ;
+edgeop    : '->' | '--';
+node_stmt : node_id attr_list? ;
+node_id   : id port?
+port      : ';' id (':' id)? ;
+
+subgraph : (SUBGRAPH id?)? '{' stmt_list '}' ;
+id       : ID
+         | STRING
+         | HTML_STRING
+         | NUMBER
+         ;
+```
+
+#### DOT语言的词法规则
+
+由于DOT语言参考指南没有给出正式的词法规则，就需要根据其中的描述来生成它们。参考文档指出：关键字`node`,`edge`,`graph`,`digraph`,`subgraph`,`strict`是不区分大小写的。如果它们区分大小写，就可以在语法中简单地使用类似`node`的字符串常量。为了能够识别`nOdE`这样的变体，需要在关键字的词法规则中为每个字符分别指定大小写的形式：
+
+```antlr
+STRICT   : [Ss][Tt][Rr][Ii][Cc][Tt];
+GRAPH    : [Gg][Rr][Aa][Pp][Hh];
+DIGRAPH  : [Dd][Ii][Gg][Rr][Aa][Pp][Hh];
+NODE     : [Nn][Oo][Dd][Ee];
+EDGE     : [Ee][Dd][Gg][Ee];
+SUBGRAPH : [Ss][Uu][Bb][Gg][Rr][Aa][Pp][Hh];
+```
+
+DOT语言中的标识符和其他编程语言相似。
+
+任意由字母标中字符(`[a-zA-Z\200-\377]`)、下划线('_')或数字(`[0-9]`)组成的，不以数字开头的字符串。
+
+八进制的数字范围`\200-377`用十六进制来表示是80懂到ff，因此ID规则如下：
+
+```antlr
+ID : LETTER | (LETTER|DIGIT)*;
+fragment
+LETTER   :  [a-zA-Z\u0080-u00FF_];
+```
+
+定义一个辅助规则DIGIT来匹配数字。数字遵循下列正则表达式：
+
+```antlr
+NUMBER : '-'? ('.' DIGIT+ | DIGIT+ ('.' DIGIT*)?);
+fragment
+DIGIT  : [0-9];
+```
+
+DOT语言中的字符串定义较为基础。任意的由双引号包围的字符序列("...")，可能包括转义后的双引号`\"`。
+
+使用点通配符来匹配字符串中的任意字符，直到遇见最后的双引号为止。额外地，将转义后的双引号作为子规则循环中的一个备选分支。
+
+```antlr
+STRING : '"' ('\\"'|.)*? '"';
+```
+
+DOT语言中还包含一种名为HTML字符串的元素，它和字符串非常相似，唯一的差别在于它使用尖括号而不是双引号。参考文档中使用`<...>`来表示这种元素，描述如下：
+
+在HTML字符串中，尖括号必须成对出现，其中可以包含未转义的换行符。除此之外，HTML字符串的内容必须是合法的XML，这就要求某些特殊字符`(", &, <以及>)`需要被转义，以便嵌入XML标签的属性或者文本中。
+
+可以使用ANTLR结构`'<' .*? '>'`来匹配两个尖括号之间的任意文本。不过，这个规则不允许其中出现嵌套的尖括号，因为它会把第一个`>`和第一个`<`配对，而不是期望最近的`<`。下列规则能够达到预期效果：
+
+```antlr
+/** 
+ * 在HTML字符串中，尖括号必须成对出现，其中可以包含未转义的换行符
+ */
+HTML_STRING : '<' (TAG|~[<>])* '>';
+fragment
+TAG  :  '<' .*? '>';
+```
+
+其中的HTML_STRING规则允许TAG元素出现在配对的尖括号之间，这样就实现了一层的嵌套。`~[<>]`负责匹配类似`&lt`;的XML字符实体。它匹配除左右尖括号外的任何字符。在这里，不能使用通配符和非贪婪匹配循环。
+
+DOT语言匹配并丢弃以`#`开头的行，它认为那是C语言的预处理器的输出。可以用与之前类似的单行注释的方法来处理它们：
+
+```antlr
+PREPROC  :  '#' .*? '\n' -> skip;
+```
+
+### 解析Cymbol语言
+
+Cymbol是一门简单的、非面向对象的编程语言，外观类似于不带结构体的C语言。下面一段带有全局变量和递归函数声明的程序就是Cymbol代码：
+
+```cymbol
+int g = 9;   // 全局变量
+int fact(int x) {  // 求阶乘的函数
+    if x == 0 then return 1;
+    return x * fact(x - 1);
+}
+```
+
+从最粗粒度观察Cymbol程序，可以发现它由一系列全局变量和函数声明组成。
+
+```antlr
+file: (functionDecl | varDecl)+;
+```
+
+同所有的类C语言一样，变量声明由一个类型开始，随后是一个标识符，最后是一个可选的初始化语句。
+
+```antlr
+varDecl
+    : type ID ('=' expr)?
+    ;
+type: 'float' | 'int' | 'void';  // 用户定义的类型
+```
+
+函数声明也基本上相同：类型后面跟着函数名，随后是被括号包围的参数列表，最后是函数体。
+
+```antlr
+functionDecl
+    : type ID '(' formalParameters? ')' block // "void f(int x) {...}"
+    ;
+formalParameters
+    : formalParameter (',' formalParameter)*
+    ;
+formalParameter
+    : type ID
+    ;
+```
+
+一个函数体是由花括号包围的一组语句。先构造出六种语句：嵌套的代码块、变量声明、if语句、return语句、赋值语句，以及函数调用。可以用下面的ANTLR语法来表达它们：
+
+```antlr
+block: '{' stat* '}';  // 语句组成的代码块，可以为空
+stat: block
+    | varDecl
+    | 'if' expr 'then' stat ('else' stat)?
+    | 'return' expr? ';'
+    | expr '=' expr ';'  // 赋值
+    | expr ';'           // 函数调用
+    ;
+```
+
+Cymbol语言的最后一个主要部分是表达式语法。因为Cymbol实际上仅仅是其他语言的原型或者基础，因此没有必要包含非常多的运算符。假设表达式包括一元取反、布尔非、乘法、加法、减法、函数调用、数组索引、等同性判断、变量、整数以及括号表达式。
+
+```antlr
+expr: ID '(' exprList? ')'  // 类似f(),f(x),f(1,2)的函数调用表达式
+    | expr '[' expr ']'     // 类似a[i],a[i][j]的数组索引表达式
+    | '-' expr
+    | '!' expr
+    | expr '*' expr
+    | expr ('+'|'-') expr
+    | expr '==' expr          // 等同性判断表达式(它是优先级最低的运算符)
+    | ID                      // 变量引用
+    | INT
+    | '(' expr ')'
+    ;
+exprList: expr (',' expr)*;   // 参数列表
+```
+
+其中的重点是通常将备选分支按照从高到低的优先级进行排序。一元取反运算符比加法的优先级更高，这是由于取反表达式的备选分支在加法表达式之前。另一方面，由于取反表达式的备选分支在数组索引表达式之后，取反运算符的优先级比数组索引运算符低。
+
+### 解析R语言
+
+R是一门极富表现力的领域特定(domain-specific)编程语言，专门用于描述和解决统计学问题。在R语言中，新建向量、对向量调用函数、筛选向量都十分容易。
+
+```r
+x <- seq(1,10,.5)
+y <- 1:5
+z <- c(9,6,2,10,-4)
+y + z
+z[z < 5] # 所有满足z < 5的元素
+mean(z)  # 计算z的均值
+zero <- function() {return(0)}
+zero()
+```
+
+R语言是一门中等大小却十分复杂的语言，R语言的程序由一系列表达式或者赋值语句构成。每个函数定义都是赋值语句，它等价于将一个函数赋值给一个变量。
+
+R语言中存在三种赋值运算符：`<-`,`=`,`<<-`。
+
+```antlr
+prog : ( expr_or_assign (';'|NL)
+    | NL
+    )*
+    EOF
+    ;
+
+expr_or_assign
+    : expr ('<-' | '=' | '<<-') expr_or_assign
+    | expr
+    ;
+
+NL : '\r'? '\n';
+```
+
+使用词法符号NL而不是常量'\n'的原因是希望同时允许Windows风格的换行符`\r\n`和UNIX风格的换行符`\n`,而这很容易在词法规则中定义。
+
+R语言语法中的大部分内容是和表达式相关的，因此在本节的剩余部分将集中精力处理它们，在R语言中，有三种主要的表达式：语句表达式(statement expression),运算符表达式(operator expression)和函数相关表达式(function-related expression)。由于R语言的语句和其他命令式编程语言的对应部分非常相似，首先完成这部分工作。下面是expr规则中包含的备选分支(它们位于运算符表达式的备选分支之后):
+
+```antlr
+| '{' exprlist '}'  // 复合语句
+| 'if' '(' expr ')' expr
+| 'if' '(' expr ')' 'else' expr
+| 'for' '(' ID 'in' expr ')' expr
+| 'while' '(' expr ')' expr
+| 'repeat' expr
+| '?' expr   // 获取expr的帮助信息，通常是字符串或者标识符
+| 'next'
+| 'break'
+```
+
+其中，第一个备选分支匹配R-intro中提到的“表达式组”----多条命令可以通过花括号`{`和`}`组成一个复合表达式。下面是`exprList`规则的定义:
+
+```antlr
+exprList
+    : expr_or_assign ( (';'|NL) expr_or_assign )*
+```
+
+R语言中的大多数表达式包含丰富的运算符。为了得到这些表达式的正确形式，最好的方法是参照yacc的语法。可执行的代码通常是(但并非总是)表达语言作者意图的最好向导。为了获知各运算符的优先级，需要查看优先级表，它显式地指明了相关运算符的优先级。例如，下列yacc语言给出了算术运算符定义:
+
+```yacc
+$left  '+' '-'
+%left  '*' '/' 
+```
+
+R语言二元、前缀和后缀运算符的表达式规则：
+
+```antlr
+expr: expr '[[' sublist ']' ']' // '[[' 源于R语言的yacc语法
+    | expr '[' sublist ']'
+    | expr ('::' | ':::') expr
+    | expr ('$'|'@') expr
+    | expr '^'<assoc=right> expr
+    | ('-'|'+') expr
+    | expr ';' expr
+    | expr USER_OP expr   // 任意被%包围的文本：'%',.*,'%'
+    | expr ('*'|'/') expr
+    | expr ('+'|'-') expr
+    | expr ('>'|'>='|'<'|'<='|'=='|'!=') expr
+    | '!' expr
+    | expr ('&' | '&&') expr
+    | expr ('|' | '||') expr
+    | '~' expr
+    | expr '~' expr
+    | expr ('->'|'->>'|':=') expr
+```
+
+`[[...]]`得到是包含单一元素的列表，而`[...]`生成一个子列表。`^`运算符后面带有后缀`<assoc=right>`，指数运算符以及向左运算符是子右向左分组合的。即2^2^3的结果是2^8,而不是4^3.
+
+`expr`规则的最后一部分，定义和调用函数。可以写出如下所示的备选分支：
+
+```antlr
+| 'function' '(' formlist? ')' expr // 定义函数
+| expr '(' sublist ')'              // 调用函数
+```
+
+`formlist`和`sublist`规则分别定义了形式参数列表和实际参数列表。这两个规则的名字取自yacc语法。
+
+```antlr
+formlist : form (',' form)+;
+form: ID
+    | ID '=' expr
+    | '...'
+    ;
+```
+
+每个参数都可以带上标记`tag=expr`,或者只是一个简单的表达式。
+
+```antlr
+sublist : sub (',' sub)*;
+sub : expr
+    | ID '='
+    | ID '=' expr
+    | STRING '='
+    | STRING '=' expr
+    | 'NULL' '='
+    | 'NULL' '=' expr
+    | '...'
+    |
+    ;
+```
+
+标识符包含字母、数字、句点('.')，以及下划线。合法的标识符不能数字、下划线和句点后的数字开头。*注意：以句点开头的标识符，例如`...`,`..1`等*
+
+```antlr
+ID : '.' (LETTER|'_'|'.') (LETTER|DIGIT|'_'|'.')*
+    | LETTER (LETTER|DIGIT|'_'|'.')*
+    ;
+fragment LETTER : [a-zA-Z];
+```
+
+## 将语法和程序的逻辑代码解耦
+
+<!-- ANTLR 权威指南中文版 看到了203页 -->
 
 ## ANTLR4 示例
 
