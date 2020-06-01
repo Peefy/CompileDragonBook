@@ -1624,7 +1624,295 @@ fragment LETTER : [a-zA-Z];
 
 ## 将语法和程序的逻辑代码解耦
 
-<!-- ANTLR 权威指南中文版 看到了203页 -->
+通常单独的语法并没有用处，而与其相关的语法分析器才能告诉输入语句是否遵循该语言规范。为了构建一个语言类应用程序，语法分析器需要在遇到特定的输入语句、词组或者词法符号时触发特定的行为。这样的词组->行为的集合构成了语言类应用程序，或者，至少担任了语法和外围程序间接口的角色。
+
+可以使用语法分析树监听器和访问器来构建语言类应用程序。监听器能够对特定规则的进入和退出事件(即识别到某些词组的事件)作出响应，这些事件分别由语法分析树遍历器在开始和完成对节点的访问时触发。另外，ANTLR自动生成语法分析树也支持访问者模式，从而允许程序控制语法分析树的遍历过程。
+
+监听器和访问器机制的最大区别在于，监听器方法不负责显式调用子节点的访问方法，而访问器必须显式触发对子节点的访问以便树的遍历过程能够正常惊醒。因为访问器机制需要显式调用方法来访问子节点，所以它能够控制遍历过程的访问顺序，以及节点被访问的次数。
+
+### 从内嵌动作到监听器
+
+构建语言类应用程序时，可以不在语法中内嵌动作(代码)。监听器和访问器机制能够将语法和程序逻辑代码解耦。这样的解耦将程序封装起来，避免了杂乱无章地分散在语法中。如果语法中没有内嵌动作，就可以在多个程序中复用同一个语法，而无须为每个目标语法分析器重新编译一次。
+
+受益于内嵌动作的机制，ANTLR能基于同一个语法文件，使用不同的编程语言生成语法分析器，由于无须担心合并后内嵌动作的冲突，对语法的更新和bug修复也十分容易。
+
+本节主要研究从包含内嵌动作的语法到完全与动作解耦的语法的演进过程。下列语法用于读取属性文件，这些文件的每行都是一个赋值语句，其中`<<...>>`是内嵌动作的概要。类似`<<start file>>`的标记代表一段恰当饿的Java代码。
+
+```antlr
+grammar PropertyFile;
+file : {<<start file>>} prop+ {<<finish file>>};
+prop : ID '=' STRING '\n' {<<process property>>};
+ID : [a-z]+;
+STRING : '"' .*? '"';
+```
+
+这样的紧耦合使得语法被绑定到了特定的程序上。更好的方案是，从ANTLR自动生成的语法分析器`PropertyFileParser`派生出一个子类，然后将内嵌动作转换为方法。这样的重构可以使得语法中仅仅包含方法调用，就可以通过语法分析器的子类实现任意数量的不同功能的程序，而无须修改原先的语法。
+
+```antlr
+grammar PropertyFile;
+@members {
+    void startFile() { }
+    void finishFile() { }
+    void defineProperty(Token name, Token value) { }
+}
+file : {startFile();} prop+ {finishFile();};
+prop : ID '=' STRING '\n' {defineProperty($ID, $STRING);};
+ID : [a-z]+;
+STRING : '"' .*? '"';
+```
+
+上述解耦方案允许该语法被不同程序复用，但是由于方法调用存在，它仍然和Java绑定在一起。
+
+为了展示重构后的语法拥有良好的复用性，构建两个不同的“语言类应用程序”，先从其中一个开始：在遇到属性的时候将它们打印出来。编写这个程序的过程非常简单，只需继承ANTLR自动生成的语法分析器类，然后覆盖语法中触发的一个或多个方法即可。
+
+```java
+class PropertyFilePrinter extends PropertyFileParser {
+    void defineProperty(Token name, Token value) {
+        System.out.println(name.getText() + "=" value.getText());
+    }
+}
+```
+
+*注意：无须覆盖startFile()和endFile()方法，因为ANTLR自动生成的PropertyFileParser已经提供了它们的默认实现。*
+
+至于第二个程序，要完成的功能是将属性放入一个Map，而非打印出来.
+
+```java
+class PropertyFileLoader extends PropertyFileParser {
+    Map<String, String> props = new OrderedHashMap<String, String>();
+    void defineProperty(Token name, Token value) {
+        props.put(name.getText(), value.getText())
+    }
+}
+```
+
+这份语法仍然存在缺陷，受内嵌动作的限制，它只能生成Java编写的语法分析器，为了使语法可被重用并具有语言中立性，需要完全避免内嵌动作的存在。
+
+### 使用语法分析树监听器编写程序
+
+构建应用逻辑和语法松耦合的语言类应用程序的关键在于，令语法分析器建立一棵语法分析树，然后在遍历该树的过程中触发应用逻辑代码。可以使用自己熟悉的方式遍历这样的语法分析树，也可以利用ANTLR自动生成的树遍历器。
+
+```antlr
+file : prop+
+prop : ID '=' STRING '\n';
+```
+
+```java
+import org.antlr.v4.runtime.tree.*;
+import org.antlr.v4.runtime.Token;
+
+public interface PropertyFileListener extends ParseTreeListener {
+    void enterFile(PropertyFileParser.FileContext ctx);
+    void exitFile(PropertyFileParser.FileContext ctx);
+    void enterProp(PropertyFileParser.PropContext ctx);
+    void exitProp(PropertyFileParser.PropContext ctx);
+}
+```
+
+`FileContext`和`PropContext`类是每条语法规则对应的语法分析树节点的实现。它们包含一些很有用的方法。
+
+为方便起见，ANTLR自动生成了一个名为`PropertyFileBaseListener`的默认实现，它包含了所有方法的空实现，即上一节涉及语法的`@member`区域中手工编写的代码：
+
+```java
+public class PropertyFileBaseVisitor<T> extends AbstractParseTreeVisitor<T> implements PropertyFileVisitor<T> {
+    @Override public T visitFile(PropertyFileParser.FileContext ctx) { }
+    @Override public T visitProp(PropertyFileParser.PropContext ctx) { }
+}
+```
+
+这样的默认实现允许只覆盖那些所关心的方法。例如，下面的属性的文件加载器和之前一样包含单个方法，但是使用了监听器机制：
+
+```java
+public static class PropertyFileLoader extends PropertyFileBaseListener {
+    Map<String, String> props = new OrderedHashMap<String, String>();
+    public void exitProp(PropertyFileParser.PropContext ctx) {
+        String id = ctx.ID().getText();
+        String value = ctx.STRING().getText();
+        props.put(id, value);    
+    }
+}
+```
+
+该版本和之前版本的最大差别在于，它继承了监听器基类(base listener)而非继承语法分析器，另外，监听器方法是在语法分析器完成解析之后才被触发的。
+
+遍历语法分析树，并在这个过程中使用新的PropertyFileLoader类监听响应的事件。
+
+```java
+// 新建一个标准的ANTLR语法分析树遍历器
+ParseTreeWalker walker = new ParseTreeWalker();
+// 新建一个监听器，将其传递给遍历器
+PropertyFileLoader loader = new PropertyFileLoader();
+walker.walk(loader, tree);  // 遍历语法分析树
+System.out.println(loader.props);   // 打印结果
+```
+
+这种基于监听器的方法之分巧妙，因为所有的遍历过程和方法触发的都是自动进行的。有些时候，自动进行的遍历反而成为一个缺陷，因为无法控制遍历的过程。例如，可能希望遍历一个C语言程序的语法分析树，跳过对代表函数体的子树的访问，从而达到忽略函数内容的目的。此外，监听器的事件方法也无法利用方法的返回值来传递数据。当需要控制遍历过程，或者希望事件方法返回值时，可以使用访问者模式。接下来，作为对比，将会构建一个基于访问器机制的属性文件加载器。
+
+### 使用访问器编写程序
+
+使用访问器机制代替监听器机制的详细步骤是：令ANTLR生成一个访问器接口，实现该接口，然后编写一个测试程序对语法分析树调用visit()方法。因此，完全不需要跟语法交互。
+
+在命令行使用`-visitor`选项时，ANTLR自动生成了接口PropertyFileVisitor和以下默认实现类PropertyFileBaseVisitor:
+
+```java
+public class PropertyFileBaseVisitor<T> extends AbstractParseTreeVisitor<T> implements PropertyFileVisitor<T> {
+    @Override public T visitFile(PropertyFileParser.FileContext ctx) { }
+    @Override public T visitProp(PropertyFileParser.PropContext ctx) { }
+}
+```
+
+可以从上一节的监听器中拷贝`exitProp()`中的代码，将它们粘贴到prop规则对应的访问器方法中。
+
+```java
+public static class PropertyFileVisitor extends PropertyFileBaseVisitor<Void> {
+    Map<String, String> props = new OrderedHashMap<String, String>();
+    public Void visitProp(PropertyFileParser.PropContext ctx) {
+        String id = ctx.ID().getText(); // prop : ID '=' STRING '\n';
+        String value = ctx.STRING().getText();
+        props.put(id, value);
+        return null;
+    }
+}
+```
+
+访问器通过显式调用ParseTreeVisitor接口的visit()方法来遍历语法分析树。该方法的实现在AbstractParseTreeVisitor中。在本例中，prop调用生成饿节点没有子节点，因此visitProp()无需再调用其他的visit().
+
+访问器机制和监听器机制下的测试程序之间的最大区别在于，访问器机制里的测试程序不需要ParseTreeWalker。它通过访问器来访问语法分析器生成的树。
+
+```java
+PropertyFileVisitor loader = new PropertyFileVisitor();
+loader.visit(tree);
+System.out.println(loader.props); // 打印结果
+```
+
+使用访问器和监听器机制，可以完成一切与语法相关的事情。语法及其对应的语法分析树，以及访问器或者监听器事件方法之间的关系。除此之外，剩下的仅仅是普通的代码。在对输入文本进行识别时，可以产生输出、收集信息、用某种方式验证输入文本，或者执行计算。
+
+默认情况下，ANTLR为每条规则生成单一类型的事件，无论语法分析器匹配到的是其中的哪一个备选分支，该事件都会被触发。这是一件非常不便的事情，因为监听器和访问器方法必须搞清楚语法分析器匹配到是哪一个备选分支。在下一节中，将会看到如何在更合适的粒度上处理事件。
+
+### 标记备选分支以获取精确的事件方法
+
+使用`#`来标记ANTLR语法文件，为获取更加精确的监听器事件，ANTLR允许用`#`运算符为任意规则的最外层备选分支提供标签。利用这种方法，在Expr语法的基础上，增加标签。
+
+```antlr
+e : e MULT e # Mult
+  | e ADD e  # Add
+  | INT      # Int
+  ;
+```
+
+ANTLR为e的每个备选分支都生成了一个单独的监听器方法。
+
+### 在事件方法中共享信息
+
+不论是出于收集信息还是计算的目的，良好的编程实践应该使用传参和返回值，而非类成员或者其他的“全局变量”。但是，ANTLR自动生成的监听器方法是不带自定义返回值和参数的。同样，ANTLR生成的访问器方法也不带自定义参数。
+
+* 使用访问器方法来返回值
+* 使用类成员在事件方法之间共享数据
+* 通过对语法分析树的节点进行标注来存储相关数据
+
+#### 使用访问器方法来返回值
+
+```java
+public static class EvalVisitor extends LExprBaseVisitor<Integer> {
+    public Integer visitMult(LExprParser.MultContext ctx) {
+        return visit(ctx.e(0)) * visit(ctx.e(1));
+    }
+
+    public Integer visitAdd(LExprParser.AddContext ctx) {
+        return visit(ctx.e(0)) + visit(ctx.e(1));
+    }
+
+    public Integer visitInt(LExprParser.IntContext ctx) {
+        return Integer.valueOf(ctx.INT().getText());
+    }
+}
+```
+
+如果需要让自定义的程序返回值，访问器是个不错的选择，因为它使用的是Java原生的返回值机制。如果不希望每次都显式调用访问器方法来访问子节点，可以换成监听器机制。但是这意味着放弃了使用Java方法返回值带来的整洁。
+
+#### 使用栈来模拟返回值
+
+ANTLR生成的监听器方法是没有返回值的（void类型）。在语法分析树中，为了向监听器方法的更高层的调用者返回值，可以将监听器的局部结果保存在一个成员变量中。比如使用栈结构，就像Java虚拟机使用栈来临时存储返回值那样。即每个表达式的计算结果堆入一个栈中。
+
+```java
+public static class Evaluator extends LExprBaseListener {
+    Stack<Integer> stack = new Stack<Integer>();
+
+    public void exitMult(LExprParser.MultContext ctx) {
+        int right = stack.pop();
+        int left = stack.pop();
+        stack.push(left * right);
+    }
+
+    public void exitAdd(LExprParser.AddContext ctx) {
+        int right = stack.pop();
+        int left = stack.pop();
+        stack.push(left + right);
+    }
+
+    public void exitInt(LExprParser.IntContext ctx) {
+        stack.push(Integer.valueOf(ctx.INT().getText()));
+    }
+}
+```
+
+使用栈的方式不够优雅，但是非常有效。通过栈，可以保证事件方法在所有的监听器事件之间的执行顺序是正确的。带返回值的访问器足够优雅，但是需要手工触发对树节点的访问。
+
+#### 标注语法分析树
+
+可以讲数据直接存储在语法分析树里。监听器和访问器机制都支持树的标注，接下来会用监听器进行演示。其中，每个子表达式对应一个子树的根节点。可以通过规则参数和返回值为节点添加字段。
+
+```antlr
+e returns [int value] 
+    : e '*' e # Mult
+    : e '+' e # Add
+    | INT     # Int
+    ;
+```
+
+ANTLR会将所有的参数和返回值放入相关的上下文对象中，这样，value就成为EContext的一个字段。
+
+```java
+public static class EContext extends ParserRuleContext {
+    public int value;
+    ...
+}
+```
+
+因为相应备选分支中的上下文类都继承自EContext，所有的监听器方法都能访问这个值。例如，监听器方法可以直接只用`ctx.value = 0`.
+
+这里展示的这种方法指定某条规则产生一个结果值，该值将被存储于此规则的上下文对象内。此过程使用了目标语言的片段，从而导致这个语法被绑定到了特定的目标语言上。不过，这种方法并不意味着这份语法被绑定到了特定的应用程序上，因为其他程序也可能需要此规则产生同样的结果值。
+
+```java
+public exitAdd(LExprParser.AddContext ctx) {
+    // e(0).value是备选分支中的第一个e子表达式的值
+    ctx.value = ctx.e(0).value + ctx.e(1).value;
+}
+```
+
+但是，在Java中，无法为`ExprContext`类动态添加一个value字段(像Ruby和Python那样)。为了使语法分析树的标注生效，需要一种标注多个节点的方法，这种方法不能是手工修改ANTLR生成的相关节点类，因为ANTLR下次生成代码时会覆盖掉修改。
+
+最简单的标注语法分析树节点的方法是使用Map来将任意值和节点一一对应起来。出于这个目的，ANTLR提供了一个简单的名为`ParseTreeProperty`的辅助类。
+
+#### 不同的数据共享方法对比
+
+为获取可复用的语法，需要使其与用户自定义的动作分离。这意味着将所有程序自身的逻辑代码放到语法之外的某种监听器或者访问器中。监听器和访问器通过操纵语法分析树来完成工作，ANTLR会自动生成合适的接口和默认实现类，以便语法分析树进行遍历。
+
+* 原生的Java调用栈：访问器返回一个用户指定类型的值。不过，如果访问器需要传递参数，那就必须使用下面两种方案：
+* 基于栈的：在上下文类中维护一个栈字段，以与Java调用栈相同的方式，模拟参数和返回值的入栈和出栈。
+* 标注：在上下文类中维护一个Map字段，用对应的值来标注节点。
+
+这三种方案都能将程序的具体逻辑封装在特定的对象内，从而使其与语法本身完全解耦。除此之外，它们各有利弊。需要综合考虑实际问题以及个人喜好，来决定使用哪种方案。
+
+使用访问器方法的代码具有良好的可读性，这是因为它们直接调用其他的访问器方法来获得局部计算结果，同时能像其他方法一样返回值。访问器方法必须显式访问它们的子节点，而监听器无须如此。因为访问器的接口是通用的，因此在其中无法使用自定义的参数。访问器必须使用其他两种方案之一来解决调用子节点的访问器方法时的传参问题。访问器方法的空间效率较高，因为它在某一时刻只需保存少量的局部结果。在完成对树的遍历之后，局部结果就不存在了。虽然访问器方法能够返回值，但是所有的值都必须具有相同的类型，其他方案不会受到这样的限制。
+
+基于栈的解决方案能够使用栈来模拟参数和返回值，但是，在手工操作栈的过程中，存在失误的可能性。这种情况可能在监听器方法没有直接调用其他监听器方法时发生。必须确保在未来的事件方法中，推出栈的内容是正确的。栈可以传递多个参数值和多个返回值。基于栈的解决方案同样具有较高的空间效率，因为不会在树中存储任何东西。所有局部结果的存储在树遍历完成之后都会被释放。
+
+树标注是首选解决方案，它允许向事件方法提供任意信息来操纵语法分析树中的各个节点。通过该方案，可以传递多个任意类型的参数值。在很多情况下， 标注比存储转瞬即逝的值的栈更好，并且来回传递数据时更不同意失误。这种方案的唯一缺点是，在整个遍历的过程中，局部结果都会被保留，因此具有更大的内存消耗。
+
+## 构建真实的语言类应用程序
+
+<!-- ANTLR 权威指南中文版 看到了234页 -->
 
 ## ANTLR4 示例
 
