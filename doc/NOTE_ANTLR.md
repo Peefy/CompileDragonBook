@@ -1912,7 +1912,312 @@ public exitAdd(LExprParser.AddContext ctx) {
 
 ## 构建真实的语言类应用程序
 
-<!-- ANTLR 权威指南中文版 看到了234页 -->
+### 加载CSV数据
+
+目标是编写一个自定义的监听器，将逗号分隔符文件(CSV)中的数据加载到一种精心设计的数据结构，由Map组成的List中。
+
+```csv
+Details,Month,Amount
+Mid Bonus,June,"$2,000"
+,January,"""zippo"""
+Total Bonuses,"","%5,000"
+```
+
+```
+[{Details=Mid Bonus,Month=June,Amount="$2,000"},
+ {Details=,Month=January,Amount="""zippo"""},
+ {Details=Total Bonuses,Month="",Amount="$5,000"}]
+```
+
+为了获得更精确的监听器方法，对之前的CSV语法的备选分支进行标记
+
+```antlr
+grammar CSV;
+
+file : hdr row+
+hdr : row;
+
+row : field (',' field)* '\r'? '\n';
+
+field 
+    : TEXT    # text
+    | STRING  # string
+    |         # empty
+    ;
+
+TEXT : ~[,\n\r"]+;
+STRING : '"' ('""'|~'"')* '"';
+```
+
+监听器的部分:
+
+```java
+public static class Loader extends CSVBaseListener {
+    public static final String EMPTY = "";
+    List<Map<String, String>> rows = new ArrayList<Map<String, String>>();
+
+    List<String> header;
+
+    List<String> currentRowFieldValues;
+
+    public void exitString(CSVParser.StringContex ctx) {
+        currentRowFieldValues.add(ctx.STRING().getText());
+    }
+
+    public void exitText(CSVParser.TextContext ctx) {
+        currentRowFieldValues.add(ctx.TEXT().getText());
+    }
+
+    public void exitEmpty(CSVParser.EmptyContext ctx) {
+        currentRowFieldValues.add(EMPTY);
+    }
+
+    public void exitHdr(CSVParser.HdrContext ctx) {
+        header = new ArrayList<String>();
+        header.addAll(currentRowFieldValues);
+    }
+
+    public void enterRow(CSVParesr.RowContext ctx) {
+        currentRowFieldValues = new ArrayList<String>();
+    }
+
+    public void exitRow(CSVParser.RowContext ctx) {
+        // 如果当前是标题行，什么都不做
+        if (ctx.getParent().getRuleIndex() == CSVParser.RULE_hdr) return;
+        Map<String, String> m = new LinkedHashMap<String, String>();
+        int i = 0;
+        for (String v : currentRowFieldValues) {
+            m.put(header.get(i), v);
+            i += 1;
+        }
+        rows.add(m);
+    }
+}
+```
+
+这就是将CSV数据读入精心设计的数据结构所需的全部工作。
+
+#### 将JSON翻译成XML
+
+和CSV语法一样，首先对JSON语法中的备选分支做一定的标记，以便ANTLR生成更精确的监听器方法。
+
+```antlr
+object
+    : '{' pair (',' pair)* '}' # AnObject
+    | '{' '}'                  # EmptyObject
+    ;
+
+array
+    : '[' value (',' value)* ']' # ArrayOfValues
+    | '[' ']'                    # EmptyArray
+    ;
+
+value
+    : STRING    # String
+    : NUMBER    # Number
+    | object    # ObjectValue
+    | array     # ArrayValue
+    | 'true'    # Atom
+    | 'false'   # Atom
+    | 'null'    # Atom
+    ;
+```
+
+翻译器的实现需要令每条规则返回与它与匹配到的输入文本等价的XML。
+
+```java
+public static class XMLEmitter extends JSONBaseListener {
+    ParseTreeProperty<String> xml = new ParseTreeProperty<String>();
+    String getXML(ParseTree ctx) {return xml.get(ctx);}
+    void setXML(ParseTree ctx, String s) {xml.put(ctx, s);}
+}
+```
+
+将每棵子树翻译完的字符串存储在该子树的根结点中。这样，工作在语法分析树更高层节点上的方法就能够获得它们，从而构造出更大的字符串。
+
+```java
+public void exitAtom(JSONParser.AtomContext ctx) {
+    setXML(ctx, ctx.getText());
+}
+
+public void exitString(JSONParser.StringContext ctx) {
+    setXML(ctx, stripQuotes(ctx.getText()));
+}
+
+public void exitObjectValue(JSONParser.ObjectValueContext ctx) {
+    setXML(ctx, getXML(ctx.object()));
+}
+
+public void exitPair(JSONParer.PairContext ctx) {
+    String tag = stripQuotes(ctx.STRING().getText());
+    JSONParser.ValueContext vctx = ctx.value();
+    String x = String.format("<%s>%s</%s>", tag, getXML(vctx), tag);
+    setXML(ctx, x);
+}
+```
+
+JSON的对象由一系列键值对组成。因此，对于每个object规则在AnObjec备选分支中发现的键值对，将其对应的XML追加到语法分析树中储存的结果之后：
+
+```java
+public void exitAnObject(JSONParser.AnObjectContext ctx) {
+    StringBuilder buf = new StringBuilder();
+    buf.append("\n");
+    for (JSONParser.PairContext pctx : ctx.pair()) {
+        buf.append(getXML(pctx));
+    }
+    setXML(ctx, buf.toString());
+}
+
+public void exitEmptyObject(JSONParser.EmptyObjectContext ctx) {
+    setXML(ctx, "");
+}
+```
+
+处理数组的方式与之相似，从各子节点中获取XML结果，将其分别放入`<element>`标签之后连接起来即可。
+
+```java
+public void exitArrayOfValues(JSONParser.ArrayOfValuesContext ctx) {
+    StringBuilder buf = new StringBuilder();
+    buf.append("\n");
+    for (JSONParser.ValueContext vctx : ctx.value()) {
+        buf.append("<element>");
+        buf.append(getXML(vctx));
+        buf.append("</element>");
+        buf.append("\n");
+    }
+    setXML(ctx, buf.toString());
+}
+
+public void exitEmptyArray(JSONParser.EmptyArrayContext ctx) {
+    setXML(ctx, "");
+}
+```
+
+最后，需要用最终的结果----由根元素`object`或者`array`生成的结果----标注语法分析树的根结点。
+
+```antlr
+json : object
+    | array
+    ;
+```
+
+可以用一个简单的set操作来完成这项工作
+
+```java
+public void exitJson(JSONParser.JsonContext ctx) {
+    setXML(ctx, getXML(ctx.getChild(0)));
+}
+```
+
+### 生成调用图
+
+使用Cymbol语法和DOT语言编写一个调用图生成器。
+
+```cymbol
+int main() {fact(); a();}
+
+float fact(int n) {
+    print(n);
+    if (n == 0) then return 1;
+    return n * fact(n - 1);
+}
+void a() {int x = b(); if false then {c();d();}}
+void b() {c();}
+void c() {b();}
+void d() {}
+void e() {}
+```
+
+为了生成这样的可视化调用图，需要读取Cymbol程序，根据它产生一个DOT文件。
+
+```dot
+digraph G {
+    ranksep=.25;
+    edge [arrowsize=.5]
+    node [shape=circle, fontname="ArialNarrow",
+            fontsize=12, fixedsize=true, height=.45];
+    main; fact; a; b; c; d; e;
+    main -> fact;
+    main -> a;
+    fact -> print;
+    fact -> fact;
+    a -> b;
+    a -> c;
+    a -> d;
+    b -> c;
+    c -> b;
+}
+```
+
+策略是：当语法分析器遇到函数声明的时候，程序将会把该函数的名字加入一个列表中，然后在一个名为`currentFunctionName`的字段中记录它。当语法分析器遇到一个函数调用时，程序将会记录下一条从`currentFunctionName`到被调用函数名的边。
+
+```antlr
+expr
+    : ID '(' exprList? ')'  # Call
+    | expr '[' expr ']'     # Index
+    | '-' expr              # Negate
+    | '!' expr              # Not
+    | expr '*' expr         # Mult
+    | expr '==' expr        # AddSub
+    | ID                    # Equal
+    | INT                   # Int
+    | '(' expr ')'          # Parens
+    ;
+```
+
+```java
+static class Graph {
+    Set<String> nodes = new OrderedHashSet<String>();
+    MultiMap<String, String> edges = new MultiMap<String, String>();
+    public void edge(String source, String target) {
+        edges.map(source, target);
+    }
+}
+```
+
+```java
+public String toDOT() {
+    StringBuilder buf = new StringBuilder();
+    buf.append("digraph G {\n");
+    buf.append("  ranksep=.25;\n");
+    buf.append("  edge [arrowsize=,5]\n");
+    buf.append("  node [shape=circle, fontname=\"ArialNarrow\",\n");
+    buf.append("        fontsize=12, fixedsize=true, height=.45];\n");
+    buf.append("  ");
+    for (String node : nodes) {
+        buf.append(node);
+        buf.append("; ");
+    } 
+    buf.append("\n");
+    for (String src : edges.keySet()) {
+        for (String tag : edges.get(src)) {
+            buf.append("  ");
+            buf.append(src);
+            buf.append(" -> ");
+            buf.append(trg);
+            buf.append(";\n");
+        }
+    }
+    buf.append("}\n");
+    return buf.toString();
+}
+```
+
+现在需要做的一切就是使用监听器填充这些数据结构。该监听器需要两个用于记录的字段。
+
+```java
+static class FunctionListener extends CymbolBaseListener {
+    Graph graph = new Graph();
+    String currentFunctionName = null;
+}
+```
+
+它需要监听两个方法。第一个是当语法分析器遇到函数定义时的方法，令其记录当前函数名:
+
+```java
+```
+
+<!-- ANTLR 权威指南中文版 看到了251页 -->
 
 ## ANTLR4 示例
 
