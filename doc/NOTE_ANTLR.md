@@ -2215,9 +2215,225 @@ static class FunctionListener extends CymbolBaseListener {
 它需要监听两个方法。第一个是当语法分析器遇到函数定义时的方法，令其记录当前函数名:
 
 ```java
+public void enterFuntionDecl(CymbolParser.FunctionDeclContext ctx) {
+    currentFunctionName = ctx.ID().getText();
+    graph.nodes.add(currentFcuntionName);
+}
 ```
 
-<!-- ANTLR 权威指南中文版 看到了251页 -->
+接着，当语法分析器发现函数调用时，程序就会记录一条从当前函数到被调用的函数的边。
+
+```java
+public void exitCall(CymbolParser.CallContext ctx) {
+    String funcName = ctx.ID().getText();
+    graph.edge(currentFunctionName, funcName);
+}
+```
+
+需要注意的是，函数调用不能出现嵌套的代码块或者声明中，如下面的代码:
+
+```cymbol
+void a() { int x = b(); if false then {c(); d();} }
+```
+
+无论语法分析树遍历器在何处遇到函数调用，它都会触发`exitCall()`监听器方法。
+
+通过语法分析树和上面的FunctionListener类，就可以用在遍历中使用自定义的监听器，并产生期望的输出：
+
+```java
+ParseTreeWalker walk = new ParseTreeWalker();
+FunctionListener collector = new FunctionListener();
+walker.walk(collector, tree);
+System.out.println(collector.graph.toString());
+System.out.println(collector.graph.toDOT());
+```
+
+### 验证程序中符号的使用
+
+在为类似Cymbol的编程语言编写解释器、编译器或者翻译器之前，需要确保Cymbol程序中使用的符号（标识符）用法正确。编写出一个能做出如下校验的Cymbol验证器：
+
+* 引用的扮靓必须有可见的（在作用域中）定义
+* 引用的函数必须有定义（函数可以以任何顺序出现，即函数定义提升） 
+* 变量不可用作函数
+* 函数不可用作变量
+
+```cymbol
+int f(int x, float y) {
+    g();    // 前向引用是没问题的
+    i = 3;  // 错误，i未定义
+    g = 4;  // 错误，g不是变量
+    return x + y;  // x, y 已定义，因此是正确的
+}
+
+void g() {
+    int x = 0;
+    float y;
+    y = g;
+    f();
+    z();
+    y();
+    x = f;
+}
+```
+
+为验证一个程序中的所有内容都符合先前的定义，需要打印函数的列表和它们的局部变量，再加上全局符号（函数和全局变量）。此外，应该在发现问题的时候给出一个错误。解决上述问题的关键在于一种恰当的数据结构，称为**符号表**。程序将符号存储在符号表里，然后通过它来检查标识符引用的正确性。
+
+#### 符号表速成
+
+语言的实现者通常把存储符号的数据结构称为符号表。实现这样的语言意味着建立复杂的符号表结构。如果一门语言允许相同的标识符在不同的上下文中具备不同含义，那么对应的符号表实现就需要将符号按照作用域分组。一个作用域仅仅是一组符号的集合，例如一组函数的参数列表或者全局作用域中定义的变量和函数。
+
+符号表本身仅仅是符号定义的仓库----它不进行任何验证工作。需要按照之前确定的规则，检查表达式中引用的变量和函数，以完成代码的验证。符号验证的过程中有两种基本的操作：定义符号和解析符号。定义一个符号意味着将它添加到作用域中。解析一个符号意味着确定该符号引用了哪个定义。在某种意义上，解析一个符号意味着寻找“最接近”的符号定义。最接近的定义域就是最内层的代码块。
+
+```cymbol
+int x;
+int y;
+void a()
+{
+    int x;
+    x = 1;
+    y = 2;
+    {int y = x;}
+}
+void b(int z)
+{ }
+```
+
+#### 验证器的架构
+
+为完成该验证器，从全局的角度进行一下规划。可以将这个问题分解为两个关键的操作：定义和解析。对于定义，需要监听变量和函数定义的事件，生成Symbol对象并将其加入该定义所在的作用域中。在函数定义开始时，需要将一个新的作用域”入栈“，然后在它结束时将该作用域”出栈“。
+
+对于解析和校验符号引用，需要监听表达式中的变量和函数引用的事件。对于每个引用，要验证是否存在一个匹配的符号定义，以及该引用是否正确使用了该符号。一个难题是：一个Cymbol程序可以在函数声明之前就调用它。称之为**前向引用(forward reference)**。为了支持这种情况，需要对语法分析树进行两趟遍历，第一趟遍历----对包括函数在内的符号进行定义，第二趟遍历中就可以看到文件中的全部函数了。下列代码触发了对语法分析树的两趟遍历：
+
+```java
+ParseTreeWalker walker = new ParseTreeWalker();
+DefPhase def = new DefPhase();
+walker.walk(def, tree);
+// 新建一个阶段，将def中符号表信息传递给该阶段
+RefPhase ref = new RefPhase(def.globals. def.scopes);
+walker.walk(ref, tree);
+```
+
+在定义阶段，将会创建很多个作用域，必须保持对这些定义域的引用，否则垃圾回收器会将它们清除掉。为保证符号表在从定义阶段到解析阶段的转换过程中始终存在，需要追踪这些作用域。最合乎逻辑的存储位置是语法分析树本身(或者使用一个将节点和值映射起来的标注Map)。这样，在沿语法分析树下降的过程中，查找一个引用对应的作用域就变得十分容易，因为函数或者局部代码块对应的树节点可以获得指向自身作用域的指针。
+
+#### 定义和解析符号
+
+确定了全局的策略，就可以开始编写验证器了，不妨从DefPhase开始，需要三个字段：一个全局作用域的引用、一个用于追踪创建的作用域的语法分析树标注器，以及一个指向当前作用域的指针。监听器方法`enterFile()`启动了整个验证过程，并创建了一个全局作用域。最后的exitFile()方法负责打印结果。
+
+```java
+public class DefPhase extends CymbolBaseListener {
+    ParseTreeProperty<Scope> scopes = new ParseTreeProperty<Scope>();
+    GlobalScope globals;
+    Scope currentScopes;  // 当前符号的作用域
+    public void enterFile(CymbolPaser.FileContext ctx) {
+        globals = new GlobalScope(null);
+        currentScope = globals;
+    }
+
+    public void exitFile(CymbolParser.FileContext ctx) {
+        System.out.println(globals);
+    }
+}
+```
+
+当语法分析器发现一个函数定义时，程序需要创建一个`FunctionSymbol`对象。`FunctionSymbol`对象有两项职责：作为一个符号，以及作为一个包含参数的作用域。为构造一个嵌套在全局作用域中的函数作用域，将一个函数作用域“入栈”，“入栈”是通过将当前作用域设置为该函数作用域的父作用域，并将它本身设置为当前作用域来完成的。
+
+```java
+public void enterFunctionDecl(CymbolParser.FunctionDeclContext ctx) {
+    String name = ctx.ID().getText();
+    int typeTokenType = ctx.type().start.getType();
+    Symbol.Type type = CheckSymbols.getType(typeTokenType);
+
+    // 新建一个指向外围作用域的作用域，这样就完成了入栈操作
+    FunctionSymbol function = new FunctionSymbol(name, type, currentScope);
+    currentScope.define(function);  // 在当前作用域中定义函数
+    saveScope(ctx, function);       // 入栈：设置函数作用域的父作用域为当前作用域
+    currentScope = function;        // 现在当前作用域就是函数作用域了
+}
+
+void saveScope(ParserRuleContext ctx, Scope s) {scopes.put(ctx, s);}
+```
+
+方法saveScope() 使用新建的函数作用域标注了该functionDecl规则节点，这样之后进行的下一个阶段就能轻易获取相应的作用域。在函数结束时，将函数作用域“出栈”，这样当前作用域就恢复为全局作用域。
+
+```java
+public void exitFunctionDecl(CymbolParser.FunctionDeclContext ctx) {
+    System.out.println(currentScope);
+    currentScope = currentScope.getEnclosingScope(); // 作用域“出栈”
+}
+```
+
+局部作用域实现与之类似。在监听器方法enterBlock()中将一个作用域入栈，然后在exitBlock()中将其出栈。接下来完成对参数和变量的定义：
+
+```java
+public void exitFormalParameter(CymbolParser.FormalParameterContext ctx) {
+    defineVar(ctx.type(), ctx.ID().getSymbol());
+}
+
+public void exitVarDecl(CymbolParser.VarDeclContext ctx) {
+    defineVar(ctx.type(), ctx.ID().getSymbol());
+}
+
+void defineVar(CymbolParser.TypeContext typeCtx, Token nameToken) {
+    int typeTokenType = typeCtx.start.getType();
+    Symbol.Type type = CheckSymbols.getType(typeTokenType);
+    VariableSymbol var = new VariableSymbol(nameToken.getText(), type);
+    currentScope.define(var);   // 在当前作用域中定义符号
+}
+```
+
+这样就完成了定义阶段代码的编写，下面编写解析阶段的代码，首先，将当前作用域设置为定义阶段中得到的全局作用域。
+
+```java
+public RefPhase(GlobalScope globals, ParseTreeProperty<Scope> scopes) {
+    this.scopes = scopes;
+    this.globals = globals;
+}
+
+public void enterFile(CymbolParser.FileContext ctx) {
+    currentScope = globals;
+}
+```
+
+之后，当树遍历器触发Cymbol函数和代码的进入和推出方法时，根据定义阶段在树中存储的值，将currentScope设为对应的作用域。
+
+```java
+public void enterFunctionDecl(CymbolParser.FunctionDeclContext ctx) {
+    currentScope = scopes.get(ctx);
+}
+
+public void exitFunctionDecl(CymbolParser.FunctionDeclContext ctx) {
+    currentScope = currentScope.getEnclosingScope();
+}
+
+public void enterBlock(CymbolParser.BlockContext ctx) {
+    currentScope = scopes.get(ctx);
+}
+
+public void exitBlock(CymbolParser.BlockContext ctx) {
+    currentScope = currentScope.getEnclosingScope();
+}
+```
+
+在遍历器正确设置作用域之后，就可以在变量引用和函数调用的监听器方法中解析符号了。当遍历器遇到一个变量引用时，它调用`exitVar()`,该方法使用`resolve()`方法在当前作用域的符号表中查找该变量名。如果`resolve`方法在当前作用域中没有找到相应的符号，它会沿着外围作用域链查找。必要情况下，`resolve`将会一直向上查找，直至全局作用域为止。如果它没有找到合适的定义，则返回null。此外，若`resolve()`方法找到的符号是函数而非变量，就需要生成一个错误消息。
+
+```java
+public void exitVar(CymbolParser.VarContext ctx) {
+    String name = ctx.ID().getSymbol().getText();
+    Symbol var = currentScope.resolve(name);
+    if (var == null) {
+        CheckSymbols.error(ctx.ID().getSymbol(), "no such variable: " + name);
+    }
+    if (var instanceof FunctionSymbol) {
+        CheckSymbols.error(ctx.ID().getSymbol(), name + "is not a varible");
+    }
+}
+```
+
+处理函数调用的方法与之基本相同。如果找不到定义，或者找到的定义是变量，那么就输出一个错误。
+
+## 错误报告与恢复
+
+<!-- ANTLR 权威指南中文版 看到了266页 -->
 
 ## ANTLR4 示例
 
