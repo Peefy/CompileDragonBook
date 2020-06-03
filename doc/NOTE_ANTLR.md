@@ -2806,7 +2806,240 @@ public class MyErrorStrategy extends DefaultErrorStrategy {
 
 ## ANTLR属性和动作
 
-<!-- ANTLR 权威指南中文版 看到了314页 -->
+之前的内容几乎所有的程序逻辑代码都是与语法分析树遍历器分离的，这意味着代码总是在语法分析完成之后执行。一些语言类应用程序需要在语法分析过程中执行自身的逻辑代码。为了达到这个目的，需要一种手段，将代码片段----称为动作----直接注入ANTLR生成的代码中。
+
+内嵌动作的用处：
+
+* 简便：有时，使用少量的动作，避免创建一个监听器或者访问器会使事情变得更加简单。
+* 效率：在资源紧张的程序中，可能不想把宝贵的时间和内存浪费在建立语法分析树上。
+* 带判定的语法分析过程：在某些罕见情况下，必须依赖从之前的输入流中获取的数据才能正常地进行语法分析过程。一些语法需要建立一个符号表，以便在未来根据情况差异化地识别输入的文本。
+
+动作就是使用目标语言(即ANTLR生成的代码的语言)编写的、放置在`{...}`中的任意代码块。可以在动作中编写任意代码，只要它们是合法的目标语言语句。动作的典型用法是操纵词法符号和规则引用的属性(attribute)。例如，可以读取一个词法符号对应的文本或者整个规则匹配的文本。通过词法符号和规则引用中获取的数据，就可以打印结果或者执行任意计算。规则允许参数和返回值，因此可以在规则之间传递数据。
+
+### 使用带动作的语法编写一个计算器
+
+目标是在不使用访问器，甚至不建立语法分析树的前提下，重写编写一个功能相同的计算器。可以了解到如何将生成的语法分析树放入包中、定义语法分析器的字段和方法、在备选分支中插入动作、标记语法元素便在动作中使用，以及定义规则的返回值。
+
+#### 在语法规则之外使用动作
+
+在语法规则之外，希望将两种东西注入自动生成的语法分析器和词法分析器：package/import语句以及类似字段和方法这样的类成员。
+
+下面是一份理想化的代码生成模版，它展示了在语法分析器这样的自动生成代码中，希望注入代码片段的位置：
+
+```java
+<header>
+public class <grammarName>Parser extends Parser {
+    <members>
+    ...
+}
+```
+
+可以在语法中使用`@header{...}`来指定一段`header`动作代码，使用`@members{...}`向生成的代码中注入字段或者方法。在一个联合了文法和词法的语法中，这些具名的动作会同时应用于语法分析器和词法分析器(ANTLR选项-package允许直接设定包名，而无需使用header动作)。如果需要限制一段动作代码只出现在语法分析器或者词法分析器中，可以使用`@parser::name`或者`@lexer::name`。
+
+```antlr
+grammar Expr;
+@header {
+    package tools;
+    import java.util.*;
+}
+
+@parser::members {
+    /** "memory"字段用于存储变量/变量值对 */
+    Map<String, Integer> memory = new Hashmap<String, Integer>();
+
+    int eval(int left, int op, int right) {
+        switch(op) {
+            case MUL : return left * right;
+            case DIV : return left / right;
+            case ADD : return left + right;
+            case SUB : return left - right;
+        }
+        return 0;
+    }
+}
+```
+
+#### 在规则中嵌入动作
+
+这些动作可以生成输出、更新数据结构，或者设置规则的返回值。
+
+stat规则用于识别表达式，变量赋值语句和空行。因为发现空行时什么都不做，所以stat规则只需要两个动作：
+
+```antlr
+stat: e NEWLINE  {System.out.println(se.v);}
+    | ID '=' e NEWLINE {memory.put($ID.text, $e.v);}
+    | NEWLINE
+    ;
+```
+
+动作被执行的时机是它前面的语法元素之后，它后面的语法元素之前。在本例中，动作出现在备选分支的末尾，因此它们会在语法分析器匹配到整个语句之后被执行。当stat发现一个后面跟着NEWLINE的表达式时，它应当打印出该表达式的值；当stat发现一个变量赋值语句时，它就应当将该键值对存储到memory字段中。
+
+这些动作代码中唯一陌生的语法是`$e.v`和`$ID.text`。通常`$x.y`是指元素x的y属性，其中x可以是词法符号引用或者规则引用。在这里，`$e.v`指的是调用规则e的返回值，`$ID.text$`指的是ID词法符号匹配到的文本。
+
+如果ANTLR无法识别y属性，它就不会转换该属性。在本例中，text是一个词法符号的已知属性，所以ANTLR将它转换为`getText()`。还可以使用`$ID.getText()$`来达到相同效果。
+
+```antlr
+e returns [int v]
+    : a=e op=('*'|'/') b=e {$v = eval($a.v, $op.type. $b.v);}
+    | a=e op=('+'|'-') b=e {$v = eval($a.v, $op.type. $b.v);}
+    | INT                  {$v = $INT.int;}
+    | ID
+    {
+        String id = $ID.text;
+        $v = memory.containsKey(id) ? memory.get(id) : 0;
+    }
+    | '(' e ')'  {$v = $e.v;}
+    ;
+```
+
+上面的例子指定了一个整数类型的返回值v。这就是之前stat的动作中引用`$e.v`的原因。ANTLR的返回值和Java的返回值的差异在于，需要为它们命名，并且可以有多个返回值。
+
+`op=('*'|'/')`标记可以指向一个词法符号，也可以指向在匹配词法符号或规则过程中生成的ParserRuleContext对象。
+
+将一切打包称一个规则上下文对象，ANTLR通过对泽上下文对象(rule context object)来实现语法分析树的节点。每次规则调用都会新建并返回一个规则上下文对象，它存储了相应规则在输入流的特定位置上进行识别工作的所有重要信息。
+
+```java
+public final EContext e(...) throws RecognitionException {...}
+```
+
+自然地，规则上下文对象非常适合放置与特定规则相关的数据实体。
+
+```java
+public static class EContext extends ParserRuleContext {
+    public int v;       // 规则e的返回值，源于"returns [int v]"
+    public EContext a;  // (递归的)规则引用e上的标记a
+    public Token op;    // 类似('*'|'/')的运算符子规则上的标记
+    public EContext b;  // (递归的)规则引用e上的标记b
+    public Token INT;   // 第三个备选分支引用的INT
+    public Token ID;    // 第四个备选分支引用的ID
+    public EContext e;  // ed的调用过程对应的上下文对象的引用
+    ...
+}
+```
+
+标记总是会成为规则上下文对象的成员，但是ANTLR并不总是为类似ID，INT和e的备选分支元素生成字段。ANTLR只有在它们被语法中的动作引用时才为它们生成字段(例如e中的动作)。ANTLR会尽可能地减少上下文对象中字段的数量，
+
+e中的所有动作都通过赋值语句`$v=...;`来设置返回值。该语句虽然设置了返回值，但是并不会导致对应的规则函数返回（不要在动作中使用return语句，它会使语法分析器崩溃）。下面是开头两个备选分支使用的动作：
+
+```antlr
+$v = eval($a.v, $op.type, $b.v);
+```
+
+这段代码计算子表达式的值并将其赋给了e的返回值。`eval()`方法的参数是两个e引用的返回值`$a.v`和`$b.v$`，以及当前备选分支匹配到运算符类型`$op.type`。`$op.type$`必然是某个算术运算符的词法符号类型。可以重复使用同一个标记(只要它们指向相同类型的对象)。
+
+第三个备选分支的动作中使用`$INT.int$`来访问INT词法符号匹配到的文本对应的整数。它仅仅是`Integer.valueOf($INT.text)`的简写。这些内嵌的动作比等价的访问器方法`visitInt()`要简单的多（代价是使程序的逻辑代码和语法纠缠在了一起）。
+
+```java
+/** INT */
+@Override
+public Integer visitInt(LabledExprParser.IntContext ctx) {
+    return Integer.valueOf(ctx.INT().getText());
+}
+```
+
+第四个备选分支识别一个变量的引用，如果在此之前它的值已经被存储过，就将e的返回值设置为该变量在memory中的值。这段动作代码使用了Java的`?:`运算符，不过也能轻易地将它改写成`if-else`的形式。可以在动作中放入任何东西，只要它们能在Java方法中正常工作即可。
+
+最后一个备选分支中的`$v = $e.v`；动作将返回值设为括号中的表达式的值。
+
+为在不同的表达式之间共享memory字段的值，需要用同一个语法分析器实例处理所有的输入行:
+
+```java
+ExprParser parser = new ExprParser(null);   // 共享同一个语法分析器的实例
+parser.setBuildParser(false);               // 不需要建立语法分析树
+```
+
+当读入一行时，需要新建一个词法符号流，将其传给共享的语法分析器。
+
+```java
+while (expr != null) {   // 当多于一个表达式时
+    // 为每行(每个表达式)新建一个词法分析器和词法符号流
+    ANTLRInputStream input = new ANTLRInputStream(expr + "\n");
+    ExprLexer lexer = new ExprLexer(input);
+    lexer.setLine(line);    // 通知词法分析器输入的位置
+    lexer.setCharPositionInLine(0); 
+    CommonTokenStream tokens = new CommonTokenStream(lexer);
+    parser.setInputStream(tokens);  // 用新的词法符号流通知语法分析器
+    parser.stat();         // 开始语法分析过程
+    expr = br.readLine();  // 检查下一行是否存在
+    line++;
+}
+```
+
+### 访问词法符号和规则的属性
+
+以CSV语法为基础，理解一些与动作相关的特性。
+
+可以使用`locals`区域(section)定义局部变量。经过定义参数和返回值后，`locals`区域中的声明就会成为规则上下文对象的字段。由于在每次规则调用⌚都会获得一个新的规则上下文，可以预料，同时也获得了`locals`的一份新拷贝。
+
+```antlr
+file
+locals [int i=0]
+    : hdr (row+=row[$hdr.text.split(",")] {$i++;} )+
+     {
+         System.out.println($i + " rows");
+         for (RowContext r : $rows) {
+             System.out.println("row token interval: " + r.getSourceInterval());
+         }
+     }
+    ;
+```
+
+file规则定义了一个局部变量i，并且使用动作代码`$i++`来统计当前输入的行数。引用局部变量时请不要忘记`$`前缀，否则编译器会报告变量未定义的错误。ANTLR将`$i`转换成`_localctx.i`;在file规则对应的规则函数中，实际上是不存在局部变量i的。
+
+规则调用`row[$hdr.text.split(",")]`显示，使用方括号而非圆括号来向规则传递参数(圆括号已经被ANTLR的子规则语法占用了)。参数表达式`$hdr.text.split(",")`将hdr规则匹配到的文本切分为一组row规则所需的字符串。
+
+`$hdr`是对唯一的hdr规则调用的引用，它指向本次调用的HdrContext对象。无需对hdr规则引用进行标记的原因是`$hdr`是独一无二的。因此，`$hdr.text`就是标题行匹配到的文本。使用标准的Java方法`String.split()`将逗号分隔的标题列切分为一组字符串。稍后会看到row规则接收一个字符串数组作为参数。
+
+对row的调用也引入了一种新的标记，即`+=`而非`=`标记符。`=`用于跟踪单个值，而这里的标记rows是所有的row调用返回的`RowContext`对象的List。在打印出rows的数量后，file规则中最后的动作代码通过一个循环遍历了所有的`RowContext`对象。在循环的每次迭代中，它都打印出row规则调用匹配到的词法符号索引值范围。
+
+ANTLR只能看到`locals`关键字定义的局部变量，而无法看到用户编写的任意内嵌动作中的局部变量。它们之间的差别在于，file规则对应的语法分析树节点只会定义字段i，而不会定义字段r。
+
+现在转到hdr规则，在该规则中，仅仅打印出标题行的内容。可以通过`$hdr.text`来完成这项工作，就是row规则引用匹配到的文本。另外，也可以直接用`$text`获得当前的规则匹配到的文本。
+
+```antlr
+hdr : row[null] {System.out.println("header: " + $text.trim()+"'");};
+```
+
+现在使用row规则中的动作，将每行数据转换成以恶搞从列名到列值的Map。首先，row接收一组列名作为参数，返回一个Map。其次，为了在列名组成的数组中移动，需要一个局部变量col。在解析该行数据之前，需要初始化返回的Map。
+
+```antlr
+/* 由规则" row : field (',' field)* '\r'? '\n'; " 衍生而来 */
+row[String[] columns] returns [Map<String, String> values]
+locals [int col=0]
+@init {
+    $values = new HashMap<String, String>(); 
+}
+@after {
+    if ($values != null && $values.size() > 0) {
+        System.out.println("values = " + $values);
+    }
+}
+    : field
+    {
+        if ($columns != null) {
+            $values.put($columns[$col++].trim(), $field.text.trim());
+        }
+    }
+    (
+        ',' field
+        {
+            if ($columns != null) {
+                $values.put($columns[$col++].trim(), $field.text.trim());
+            }
+        }
+    )* '\r'? '\n'
+    ;
+```
+
+init动作发生在对应规则匹配过程开始之前，无论它有多少个备选分支。同样，after动作发生在对应规则的备选分支之一完成匹配之后。在这个例子中，将打印语句置于row规则的最外层备选分支的末尾，以阐明after动作的功能。
+
+`field`动作的主要部分通过`$values.put(...)`将列名对应字段的值存储了结果map中。这个方法的第一个参数是这样得到的：获得列名，将索引值增一，然后使用`$columns[$col++].trim()`移除列名两侧的空白。第二个参数通过`$field.text.trim()`移除掉最近一次匹配到的字段文本两侧的空白(row中的两段动作代码是完全相同的，所以最好将它们重构为members动作中的一个方法)。
+
+### 识别关键字不固定的语言
+
+例如，Java5新增一个一个关键字enum，因此同一个编译器必须能够根据` -version`选项动态地开启和关闭它。
+
+<!-- ANTLR 权威指南中文版 看到了333页 -->
 
 ## ANTLR4 示例
 
