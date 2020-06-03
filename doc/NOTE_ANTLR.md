@@ -2685,7 +2685,128 @@ ANTLR的语法分析器具有内置的防护措施，以保证错误恢复过程
 
 ### 勘误备选分支
 
-<!-- ANTLR 权威指南中文版 看到了306页 -->
+一些语法错误十分常见，以至于对它们进行特殊处理是值得的。例如，开发者经常在嵌套的函数调用后写错括号的数量。为了对这些情况进行特殊处理，只需增加一些备选分支，匹配这些常见错误即可。下面的语法识别单参数的函数调用，其中参数可能包含嵌套的括号。`fcall`规则具有两个所谓的**勘误备选分支(error alternative)**.
+
+```antlr
+stat: fcall ';';
+fcall
+    : ID '(' expr ')'
+    | ID '(' expr ')' ')' {notifyErrorListeners("Too many parentheses");}
+    | ID '(' expr {notifyErrorListeners("Missing closing ')' ");} 
+
+expr: '(' expr ')'
+    | INT
+    ;
+```
+
+这些勘误备选分支会给ANTLR自动生成的语法分析器带来少量额外的工作，但是不会对他形成干扰。和其他备选分支一样，只要输入文本与之相符，语法分析器就会匹配到它们。
+
+### 修改ANTLR的错误处理策略
+
+默认的错误处理机制表现出色，不过还是会遇到一些非典型的、需要修改默认机制的场景。首先，希望关闭某些默认的错误处理功能，它们会带来额外的运行负担。其次，可能希望语法分析器在遇到第一个语法错误时就退出。这种情况的例子是，当处理类似bash的命令行输入时，从错误中恢复是毫无意义的。不能一意孤行地执行有风险的命令，因此语法分析器可以一遇到问题就退出。
+
+首先查看一下`ANTLRErrorStrategy`接口以及实现类`DefaultError-Strategy`。该类完成了全部的默认错误处理工作。例如，下面的语句是每个ANTLR自动生成的规则函数中的catch中的内容：
+
+```antlr
+_errHandler.reportError(this, re);
+_errHandler.recover(this, re);
+```
+
+`_errHandler`是一个指向`DefaultErrorStrategy`实例的变量。`reportError()`方法和`recover()`方法实现了错误的报告和同步0返回功能。`reportError()`方法根据抛出的异常类型，将报告错误的职责委托给另外三个方法之一。
+
+对于之前提到的第一种非典型场景：减少错误处理机制给语法分析器带来的运行负担。它是ANTLR根据Simple语法中的`member+`子规则自动生成的:
+
+```antlr
+_errHandler.sync(this);
+_la = input.LA(1);
+do {
+    setState(22);
+    member();
+    setState(26);
+    _errHandler.sync(this);
+    _la = _input.LA(1);
+} while (_la == 6);
+```
+
+在某些程序中，可以假定输入在句法上是正确的，例如网络协议。在这种情况下，最好避免错误检查和恢复带来的负荷。可以通过以下方法达到这个目的：继承`DefaultErrorStrategy`类，并使用一个空方法覆盖`sync()`。Java编译器通常会在后续的优化过程中将`_errHandler.sync(this)`调用内嵌化，并执行无用代码消除。在下一个例子中，将会看到如何令语法分析器采取不同的错误处理策略。
+
+另外一种非典型场景是令语法分析器在第一个语法错误处退出。为了达到这个目的，需要覆盖三个关键方法，详情如下：
+
+```java
+import org.antlr.v4.runtime.*;
+
+public class BailErrorStrategy extends DefaultErrorStrategy {
+    /** 不从异常e中恢复，而是用一个通用的
+     *  RuntimeException包装它，这样它
+     *  就不会被规则函数中的catch语句捕获
+     *  异常e是生成的RuntimeException的cause成员
+     */
+    @Override
+    public void recover(Parser recognizer, RecognitionException e) {
+        throw new RuntimeException(e);
+    }
+
+    /** 确保不会试图执行行内恢复，如果语法分析器
+     *  成功地进行了恢复，它就不会抛出一个异常
+     */
+    @Override
+    public Token recoverInline(Parser recognizer) throws RecognitionException 
+    {
+        throw new RuntimeException(new InputMismatchException(recognizer));
+    }
+
+    /** 确保不会试图从子规则的问题中恢复
+     */
+    @Override
+    public void sync(Parser recognizer) { }
+}
+```
+
+出于测试的目的，可以复用一些样例代码。除了创建和启动语法分析器外，还需要创建一个新的`BailErrorStrategy`实例， 并且令语法分析器使用它来替代默认的错误处理策略：
+
+```java
+parser.setErrorHandler(new BailErrorStrategy());
+```
+
+随后，应当令它在第一个词法错误处报错并退出。要达到这个目的，只需覆盖Lexer类中的recover方法即可。
+
+```java
+public static class BailSimpleLexer extends SimpleLexer {
+    public BailSimpleLexer(CharStream input) {
+        super(input);
+    }
+    public void recover(LexerNoViableAltException e) {
+        throw new RuntimeException(e); // 报错退出
+    }
+}
+```
+
+修改语法分析器的错误报告策略，如果希望修改标准的错误消息“在输入X处没有可行的备选分支”，可以覆盖`reportNoViableAlternative()`方法，将错误消息改成其他内容。
+
+```java
+import org.antlr.v4.runtime.*;
+
+public class MyErrorStrategy extends DefaultErrorStrategy {
+    @Override
+    public void reportNoViableAlternative(Parser parser, NoViableAltException e) throws RecognitionException {
+        // ANTLR基于语法生成的语法分析器是Parser的子类
+        // Parser类继承了Recognizer类
+        // 方法参数parser指向检测到错误的语法分析器
+        String msg = "can't choose between alternatives";
+        parser.notifyErrorListeners(e.getOffendingToken(), msg, e);
+    }
+}
+```
+
+如果需要的仅仅是改变错误消息输出的位置，可以指定一个`ANTLRErrorListener`。
+
+### 小结
+
+了解了错误报告和恢复机制的全部细节。利用`ANTLRErrorListener`和`ANTLRErrorStrategy`接口，能够非常灵活地指定错误消息的输出位置、错误消息的内容以及语法分析器从错误中恢复的方法。
+
+## ANTLR属性和动作
+
+<!-- ANTLR 权威指南中文版 看到了314页 -->
 
 ## ANTLR4 示例
 
