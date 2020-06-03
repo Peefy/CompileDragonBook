@@ -3039,7 +3039,72 @@ init动作发生在对应规则匹配过程开始之前，无论它有多少个�
 
 例如，Java5新增一个一个关键字enum，因此同一个编译器必须能够根据` -version`选项动态地开启和关闭它。
 
-<!-- ANTLR 权威指南中文版 看到了333页 -->
+也许更常见的应用是处理拥有巨量关键字集合的语言。可以令词法分析器分别匹配所有的关键字(作为独立的规则)，也可以编写一条ID规则作为分发器，然后在一个关键字列表中查找该规则匹配到的标识符。如果词法分析器发现该标识符是一个关键字，以它的词法符号类型从原先通用的ID类型改成相应的关键字类型。
+
+```antlr
+grammar Keywords;
+@lexer::header {
+    import java.util.*;
+}
+stat: BEGIN stat* END
+    | IF expr THEN stat
+    | WHILE expr stat
+    | ID '=' expr ';'
+    ;
+
+expr: INT | CHAR;
+
+tokens {BEGIN, END, IF, THEN, WHILE}
+```
+
+将会使用一个Map存放从关键字到其整数词法符号类型的映射作为关键字表。另外，还使用了内联的Java实例化初始化语句（内层的花括号中的代码）定义了一个Map
+
+```antlr
+@lexer::membors {
+    Map<String, Integer> keywords = new HashMap<String, Integer>() {{
+        put("begin", KeywordsParser.BEGIN);
+        put("end", KeywordsParser.END);
+        put("if", KeywordsParser.IF);
+        put("then", KeywordsParser.THEN);
+        put("while", KeywordsParser.WHILE);
+    }};
+}
+```
+
+匹配标识符
+
+```antlr
+ID : [a-zA-Z]+
+    {
+        if (keywords.containsKey(getText())) {
+            setType(keywords.get(getText())); // 重制词法符号类型
+        }
+    }
+    ;
+```
+
+这里使用了`Lexer`类的`getText()`方法来获取当前词法符号的文本内容。根据它的文本内容来确定它是否存在于keywords中。如果存在，那么就将该词法符号的类型从ID重置为相应关键字的词法符号类型。
+
+可以使用`setText()`方法修改一个词法符号的文本内容。它可以用于剥离字符常量或者字符串常量两侧的引号。通常，一个语言类应用程序只需要引号中文本。
+
+```antlr
+/** 将3个字符的‘x’输入序列转换成字符串 */
+CHAR : '\'' . '\.' {setText(String.valueOf(getText().charAt(1)));};
+```
+
+也可以使用`setToken()`方法指定词法分析器返回的Token对象。这是一种返回自定义的词法符号的方式。另外一种方式是覆盖`Lexer`的`emit()`方法。
+
+相比于语法分析器，词法分析器需要动作的情况较少，不过在诸如需要修改词法符号类型或者文本的特定场景下，它们仍然相当有用。除了在对输入文本进行词法分析时执行动作之外，另一种修改词法符号本身的方法是查看词法分析后的词法符号流。
+
+使用动作在语法中嵌入程序逻辑代码可以位于规则内，也可以位于规则外，通过header和members发挥作用。也看到了如何定义和引用规则的参数和返回值。
+
+注意：尽可能地避免使用语法中的动作，因为它将一份语法绑定到了特定的目标变成语言上。不仅如此，动作还将语法绑定到了一个特定的程序上。
+
+## 使用语义判定修改语法分析过程
+
+
+
+<!-- ANTLR 权威指南中文版 看到了336页 -->
 
 ## ANTLR4 示例
 
