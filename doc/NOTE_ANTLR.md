@@ -3278,9 +3278,422 @@ C++语言规范解决这种歧义问题的方案是：总是选择声明而非�
 
 ## ANTLR词法分析技巧
 
-词法分析器
+词法分析器进行词法分析工作，有时也需要一些上下文信息对词法符号作出决策，但是这些上下文信息只被语法分析器持有。比如Java的`>>`运算符，Java词法分析器可以将它匹配成右移运算符或者两个`>`符号，后者出现在范型声明的结尾处，例如`List<List<String>>`。
 
-<!-- ANTLR 权威指南中文版 看到了362页 -->
+### 将词法分析器送入不同通道
+
+绝大多数编程语言忽略词法符号间的空格和注释，这意味着它们可以出现在任何地方。这就给语法分析器带来了一个难题，必须时刻考虑两种可选的词法符号的存在：空白字符和注释。常见的解决方案是，令词法分析器匹配这些词法符号并丢弃。
+
+```antlr
+WS : [ \t\n\r]+ -> skip;
+SL_COMMENT
+    : '//' .*? '\n' -> skip;
+    ;
+```
+
+#### 填充词法符号通道
+
+ANTLR的解决方案是将类似标识符的正常词法符号送入语法分析器对应的通道，其余内容送入另外一个通道。通道就像不同的广播频率。词法规则负责将词法符号放入不同的通道，CommonTokenStream类负责只对语法分析器暴露其中一个通道。
+
+```antlr
+WS : [ \t\n\r]+ -> channel(WHITESPACE); // channel(1)
+SL_COMMENT
+    : '//' .*? '\n' -> channel(COMMENTS); // channel(2)
+    ;
+
+@lexer::members {
+    public static final int WHITESPACE = 1;
+    public static final int COMMENTS = 2;
+}
+```
+
+#### 访问隐藏通道
+
+基本策略是使用TokenStreamRewriter重写词法符号流，提取`//...`注释，改写为`/*...*/`注释：
+
+```java
+public static class CommentShifter extends CymbolBaseListener {
+    BufferedTokenStream tokens;
+    TokenStreamRewriter rewriter;
+
+    /** 创建一个绑定到词法符号流上的TokenStreamRewriter
+      * 位于词法分析器和语法分析器之间 
+      */
+    public CommentShifter(BufferedTokenStream tokens) {
+        this.tokens = tokens;
+        rewriter = new TokenStreamRewriter(tokens);
+    }
+
+    @Override
+    public void exitVarDecl(CymbolParser.VarDeclContext ctx) {
+        Token semi = ctx.getStop();
+        int i = semi.getTokenIndex();
+        List<Token> cmtChannel = 
+            tokens.getHiddenTokensToRight(i, CymbolLexer.COMMENTS);
+        if (cmtChannel != null) {
+            Token smt = cmtChannel.get(0);
+            if (cmt != null) {
+                String ctx = cmt.getText().substring(2);
+                String newCmt = "/* " + txt.trim() + " */\n";
+                rewriter.insertBefore(ctx.start, newCmt);
+                rewriter.replace(cmt, "\n"); 
+            }
+        }
+    }
+}
+```
+
+所有的事情都发生在`exitVarDecl()`中。首先，取得声明语句中的分号的词法符号索引值。因为会寻找它后面的注释。然后询问词法符号流，在分号的右侧的COMMENT通道中是否存在隐藏的词法符号。简单起见，这份代码假定每个声明之后仅存在一条注释。接下来，将旧的注释改写成新风格注释，然后使用TokenStreamRewriter将它插入到变量声明之前。最后，将原先的注释用换行符代替，相当于将它移除。
+
+### 上下文相关的词法问题
+
+词法分析器能够得到的上下文信息不如语法分析器多。解决问题的方案包括从语法分析器向词法分析器发送反馈，这样词法分析器就可以向语法分析器输入更加精确的词法符号。由于判定数量的减少，语法分析器可以变得更加简单。然而，这种方案在ANTLR语法中是行不通的，因为ANTLR自动生成的语法分析器经常在词法符号流中进行非常远的前瞻以作出语法分析决策。这意味着，远在语法分析器能够执行提供上下文信息的行为之前，词法分析器就需要将字符流处理为词法符号。
+
+一些上下文相关的词法问题：
+
+* 相同的字符序列在语法分析器中具有不同含义，比如关键字也可以作为标识符
+* 相同的字符序列可以是一个或者多个词法符号。比如Java中的`>>`既可以是右移运算符，也可以是两个泛型的结束符。
+* 相同的字符恶劣在某些情况下需要被忽略，某些情况下需要被语法分析器识别。比如Python的物理换行符和逻辑换行符。
+
+#### 关键字作为标识符
+
+比如C#可以通过LINQ功能提供对SQL的支持。SQL查询语句以关键字from开始，但是也可以把from当作变量使用：`x=from+where;`。这是一个没有歧义的表达式，而非查询，因此词法分析器不应该将from当作标识符。问题在于，词法分析器并不会对输入文本进行语法分析，也就无从得知需要将哪种词法符号送给语法分析器。
+
+可以通过两种方式允许关键字在某些上下文中作为标识符。第一种是令词法分析器将所有的关键字当作关键字类型的词法符号送给语法分析器，然后编写一条文法规则id，该规则匹配ID和任意的关键字。第二中是令词法符号将所有的关键字当作标识符，然后在语法分析器中编写如下判定来对标识符的名字进行测试：
+
+```antlr
+keyIF : {_input.LT(1).getText().equals("if")}? ID ;
+```
+
+#### 避免最长匹配带来的歧义性
+
+通常，词法分析器生成器会作出这样的假设：在每个位置上，词法分析器应当尽可能地匹配最长的词法符号。基于该假设的词法分析器的表现最为自然。例如，对于C语言中的`+=`，词法分析器应当匹配出单一的词法符号`+=`，而非两个词法符号`+`和`=`。
+
+比如对于问题`>>`既可以是右移运算符，也可以是两个泛型的结束符，有多种解决该访问的方案，最简单的一种是：令词法分析器从不将`>>`序列匹配为右移运算符，而将两个`>`符号送给语法分析器，后者可以利用上下文信息对其进行适当组装。例如：C++语法分析器中识别表达式的规则可以匹配两个右尖括号，而非单一的右移运算符。下面是expr规则中的两个备选分支，它们将单字符的词法符号组装成多字符的运算符：
+
+```antlr
+| expression ('<' '<' | '>' '>' '>' | '>' '>') expression
+| expression ('<' '=' | '>' '=' | '>' | '<') expression
+```
+
+将右移运算符作为两个单独的右尖括号处理的唯一问题在于：语法分析器同样会接受中间包含空格的尖括号`>>`。想要解决这个问题，可以在语法中加入语义判定，或者使用监听器/访问器检查生成的语法分析树，确保多个>词法符号的序列号是相邻的。在语法分析的过程中使用判定的效率不高，所以最好在语法分析结束后检查右移运算符的正确性。毕竟，大多数语言类应用程序都需要对语法分析树进行遍历（在表达式中使用判定也会破坏ANTLR将左递归规则转换为非左递归规则的机制）
+
+#### Python换行符
+
+在Python中，语句的终止标志是换行符而非分号。与此同时，不希望一行语句过长，所以在Python在特定的上下文中会忽略换行符。例如，Python允许将一个函数调用分为多行。
+
+圆括号、方括号或者花括号中的表达式可以分散在多个物理行中。比如在表达式`1+2`中的`+`插入一个换行符就会报错，不过`(1+2)`可以跨行。隐式的续行可以带有注释，以及允许空白的续行。如下所示：
+
+```py
+f(1,  # 第一个参数
+
+2,    # 第二个参数
+      # 带有注释的空行
+3)    # 第三个参数
+```
+
+两个或者多个物理行可以使用反斜杠字符`(\)`连接成一个逻辑行，方式如下：当一个物理行以一个不在字符串中或注释中的反斜杠结束时，它会和接下来的一行连接形成一个单独的逻辑行，反斜杠和后面的换行符会被删除掉。
+
+上述描述带来的结果是：语法分析器和词法分析器均需要有选择地保留和丢弃部分换行符。在之前对词法符号通道的学习中，令语法分析器始终检查可选的空白字符不是一个好办法。这意味着，处理可选的换行符成为Python词法分析器的职责。就变成了另一个语法上下文决定词法分析器行为的问题。
+
+编写一份识别简单的Python代码的语法，它能够匹配赋值语句和简单的表达式。将忽略字符串，以便专注于处理注释和换行符。下面是文法规则：
+
+```antlr
+file: stat+ EOF;
+stat: assign NEWLINE
+    | expr NEWLINE 
+    | NEWLINE         // 忽略空行 
+    ;
+
+assign: ID '=' expr;
+
+expr: expr '+' expr
+    | '(' expr ')'
+    | call
+    | list
+    | ID
+    | INT
+    ;
+
+call: ID '(' (expr (',' expr)* )? ')';
+
+list: '[' expr (',' expr)* ']';
+
+ID : [a-zA-Z_] [a-zA-Z_0-9]*;
+
+NEWLINE
+    : '\r'? '\n'
+    ;
+
+/** 注意：这里没有考虑Python的缩进规则 */
+WS  : [ \t]+ -> skip;
+    ;
+
+/** 匹配注释。这里不匹配换行符，因为需要将它送入语法分析器 */
+COMMENT
+    : '#' ~[\r\n]* -> skip;
+    ;
+
+/**  */
+LINE_ESCAPE
+    : '\\' '\r'? '\n' -> skip;
+    ;
+
+/** 嵌套(..) 或者 [..] 中换行符将被忽略 */
+IGNORE_NEWLINE
+    : '\r'? '\n' {nesting>0}? -> skip;
+    ; 
+```
+
+此规则必须放置在NEWLINE之前，这样，当判定为真时，词法分析器就会按照解决歧义性的默认方法，选择IGNORE_NEWLINE规则。也可以将`{nesting==0}?`判定放在NEWLINE中来达到同样的效果。
+
+在发现方括号和圆括号时，需要适当地调整此变量的值。首先，需要定义该nesting变量。
+
+```antlr
+@lexer::members {
+    int nesting = 0;
+}
+
+LPAREN : '(' {nesting++;};
+RPAREN : ')' {nesting--;};
+LBRACK : '[' {nesting++;};
+RBRACK : ']' {nesting--;};
+```
+
+严格而言，需要为方括号和圆括号各设置一个变量，以确保括号的精确匹配。不过，实际上无须担心类似`[1,2)`这样的不匹配括号，因为语法分析器会检测到该错误。在这样的语法错误中，对换行符的处理偏差是无关紧要的。
+
+### 字符流中孤岛
+
+除了类似于CSV，Java，Python和Java文件都只包含这些语言的文本。不过还存在一些格式的文件，其中结构化区域---或者称为孤岛----被随机的文本所包围。称这样的格式为孤岛语言，并使用孤岛语法来描述它们，比如Letax，markdown，xml等。在XML文件中，结构化的标签和`&`实体被大片不关心的文本所包围。由于各XML标签内部是结构化的，也可以称XML为群岛语言。
+
+如果编写一个C预处理器，那么预处理器命令就构成了孤岛语言，而C代码就是周围的海洋。如果在为IDE编写C语言的语法分析器，那么它就必须忽略预处理命令构成的“海洋”。
+
+为将XML的标签和普通文本区分开，首先想到的方案是编写一个处理输入字符流的过滤器，丢弃标签之间的全部内容。这样也许能够零词法分析器更加容易识别处孤岛部分，但过滤器会丢弃所有的普通文本内容。例如，对于输入`<name>John</name>`，并不希望丢弃John。
+
+真正的解决方案是，首先编写一份子XML语法，它将标签内的文本识别为一种词法符号，标签外的文本识别为另一种词法符号。
+
+```antlr
+grammar Tags;
+file : (TAG|ENTITY|TEXT|CDATA)* ;
+```
+
+file规则并不验证XML的格式是否正确----它只识别XML中的各种词法符号。
+
+为正确地分割XML文件，为孤岛部分指定了词法规则，而在最后放置了一条名为TEXT的规则来兜底，它匹配其余的任何内容。
+
+```antlr
+COMMENT : '<!--' .*? '-->' -> skip;
+CDATA : '<![CDATA[' .*? ']]>' ;
+TAG : '<' .*? '>' // 必须放置在其他类似标签的结构之后
+ENTITY : '&' .*? ';' ;
+TEXT : ~[<&]+;     // 除<和&之外的任意字符序列
+```
+
+上述规则大量使用了`.*?`非贪婪匹配，它会一直向后扫描，直至遇到匹配后续规则的内容为止。
+
+TEXT规则匹配一个或多个字符，只要它们不是标签或者实体的起始字符即可。不能用`.+`代替`~[<&]+`,那样的话，一旦进入了循环，它就会吞掉所有的输入字符。因为TEXT中`.+`后面没有任何内容，所以该循环就无法停止。
+
+XML不允许以`--->` 结尾的注释和包含`--`的注释。可以为这些非法的注释编写词法规则，输出指定的错误消息。
+
+```antlr
+BAD_COMMENT1 : '<!--' .*? '--->'
+               {System.out.println("Can't have ---> end comment");} -> skip;
+BAD_COMMENT2 : '<!--' ('--'|.)*? '--->'
+               {System.out.println("Can't have -- end comment");} -> skip;        
+```
+
+#### 使用词法模式处理上下文相关的词法符号
+
+标签内外的文本实际上是不同的语言。例如，`id="45"`在标签外仅仅是普通文本，但是在标签内部是三个词法符号。在某种意义上，希望XML词法分析器根据上下文使用不同的规则进行匹配。ANTLR提供了词法模式(lexical mode)，允许词法分析器在不同的上下文中切换(模式)。
+
+词法模式允许将单个词法分析器分成多个子词法分析器。词法分析器会返回被当前模式下的规则匹配的词法符号。一门语言能够进行模式切换的一个重要要求是包含清晰的词法“哨兵”，它能够触发模式的来回切换，例如尖括号。换言之，模式的切换只依赖于词法分析器可以从输入文本中获得的信息，而不依赖于语义上下文。
+
+```antlr
+grammar MOdeTagsLexer;
+
+// 默认情况下的规则
+OPEN : '<'  -> mode(ISLAND);  // 切换到ISLAND模式
+TEXT :  ~'<'+;                // 收集所有的文本
+
+mode ISLAND;
+CLOSE: '>'   -> mode(DEFAULT_MODE); // 回到SEA模式
+SLASH: '/';
+ID : [a-zA-Z]+;                      // 匹配标签中的ID并将其输送给语法分析器
+```
+
+`OPEN`和`TEXT`规则位于默认模式下。`OPEN`匹配单个`<`，使用词法分析器指令model(ISLAND)来切换模式。之后，词法分析器就只会使用ISLAND模式下的规则进行工作。TEXT匹配任意非标签起始字符的序列。由于这些词法规则中不包含`skip`指令，因此所有的文本都会被匹配为词法符号送给语法分析器。
+
+在ISLAND模式中，词法分析器匹配`>`,`/`和ID词法符号。当词法分析器发现`>`时，它会执行切换回模式模式的指令，该模式由Lexer类中的常量DEFAULT_MODE标识。这就是词法分析器来回切换模式的方法。
+
+和Tags语法一样，这份稍大的XML语法子集对应的语法分析器能哦股匹配标签和文本块，改进之处在于，现在使用了tag规则来匹配独立的标签元素而非一个单独的标签词法符号。
+
+```antlr
+parser grammar ModeTagsParser;
+
+options {tokenVocab=ModeTagsLexer; } // 使用ModeTagsLexer.g4中的词法符号
+
+file: (tag|TEXT)*;
+
+tag : '<' ID '>'
+    | '<' '/' ID '>'
+    ;
+```
+
+当语法分析器和词法分析器位于不同文件中时，需要确保两个文件中的词法符号类型和词法符号名称一致。例如，词法分析器中的词法符号OPEN必须和语法分析器中的同名词法符号具有相同的词法符号类型。
+
+为了将语法应用于实际程序，既可以使用通常的监听器或者访问器机制，也可以为语法增加动作。
+
+### 对XML进行语法分析和词法分析
+
+XML是一门已经被严格定义的语言，标准定义由W3C制定，该XML规范巨大无比。为简单起见，忽略掉在处理XML文件中不需要的东西`<!DOCTYPE..>`文档类型定义(DTD),`<!ENTITY>`实体声明，以及`<!NOTATION..>`符号声明。
+
+#### XML规范转换为ANTLR文法语法
+
+```w3cxml
+document     ::= prolog element Misc*
+prolog       ::= XMLDecl? Misc*
+content      ::= CharData? 
+             ( (element | Reference | CDSect | PI | Comment) CharData? )*
+element      ::= EmptyElemTag
+             |   STag content ETag
+EmptyElemTag ::= '<' Name (S Attribute)* S? '/>'
+STag         ::= '<' Name (S Attribute)* S? '>'
+ETag         ::= '</' Name S? '>'
+XMLDecl      ::= '<?xml>' VersionInfo EncodingDecl? SDDecl? S? '?>'
+Attribute    ::= Name Eq AttValue
+Reference    ::= EntityRef | CharRef
+Misc         ::= Comment | PI | S
+```
+
+还需要许多其他的规则，不过它们都是词法规则。不关系注释或者处理指令(Processing Instructions, PI),所以可以令词法分析器将其匹配为文本快。
+
+```antlr
+parser grammar XMLParser;
+options {tokenVocab=XMLLexer;}
+
+document : prolog ? misc* element misc*;
+
+prolog   : XMLDeclOpen attribute* SPECIAL_CLOSE;
+
+content  : chardata?
+           ( (element | reference | CDATA | PI | COMMENT) chardata? )*
+
+element  : '<' Name attribute '>' content '<' '/' Name '>'
+         | '<' Name attribute '/>'
+         ;
+
+reference : EntityRef | CharRef;
+
+attribute : Name '=' STRING;
+
+chardata : TEXT | SEA_WS;
+
+misc : COMMENT | PI | SEA_WS;
+```
+
+```antlr
+prolog      : XMLDecl versionInfo encodingDecl? standalone? SPECIAL_CLOSE;
+versionInfo : {_input.LT(1).getText().equals("version")}? Name '=' STRING;
+encodingDecl : {_input.LT(1).getText().equals("encoding")}? Name '=' STRING;
+standalone : {_input.LT(1).getText().equals("standalone")}? Name '=' STRING;
+```
+
+#### 将XML词法符号化
+
+通过从规范中提取所需的相关规则，就可以开始编写XML词法分析器了。
+
+```w3cxml
+Comment   ::= '<!--' ( (Char - '-') | ('-' (Char - '-')) )*  '-->'
+CDSect    ::= '<![CDATA[' CData ']]>'
+CData     ::= ( Char* - (Char* ']]>' Char* ) ) // anything but ']]>'
+PI        ::= '<?' PITarget (S (Char* - (Char* '?>' Char* ) ))? '?>'
+/** 除'xml'之外的任何名字 */
+PITarget  ::= Name - ( ('X'|'x') ('M'|'m') ('l'|'L') )
+/**
+ * 规范指出：CharData是不包含任何标记的开始符和CDATA区域结束符']]>'的* 任意字符串
+ */
+CharData  ::= [^<&]* - ( [^<&]* ']]>' [^<&]*  )
+EntityRef ::= '&' Name ';'
+CharRef   ::= '&#' [0-9]+ ';'
+          |   '&#x' [0-9a-fA-F]+ ';'
+Name      ::= NameStartChar (NameChar)*
+NameChar  ::= NameStartChar | "-" | "." | [0-9] | #xB7
+          |   [#x0300-#x036F] | [#x203F-#x2040]
+NameStartChar
+          ::= ":" | [A-Z] | " " | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] 
+          |   [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF]
+          |   [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] 
+          |   [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
+AttValue  ::= '"' ( [^<&"] | Reference )* '"'
+          |   '"' ( [^<&'] | Reference )* '"'
+S         ::= (#x20 | #x9 | #xD | #xA )+
+```
+
+上述文法可以分解为三个不同的模式：标签外，标签内，以及特殊的`<?...?>`标签内，并逐个编写。匹配并丢弃`<!...>` 形式的文档、实体和标记声明。
+
+```antlr
+lexer grammar XMLLexer;
+
+// 默认模式：标签外
+COMMENT   :  '<!--' .*? '-->';
+CDATA     :  '<!CDATA[' .*? ']]>';
+DTD       :  '<!' .*? '>'  -> skip;
+EntityRef :  '&' Name ';' ;
+CharRef   :  '&#' DIGIT+ ';'
+          |  '&#x' HEXDIGIT+ ';'
+          ;
+SEA_WS    :  (' ' | '\t' | '\r' ? '\n' );
+
+OPEN      :  '<'    -> pushMode(INSIDE);
+XMLDeclOpen : '<?xml' S    -> pushMode(INSIDE);
+SPECIAL_OPEN  '<?'  Name  -> more, pushMode(PROC_INSTR);
+
+TEXT :   ~[<&]+
+
+mode PROC_INSTR;
+PI  :  '?>'   -> popMode;
+IGNORE :  .  -> more;
+
+mode INSIDE;
+
+CLOSE :  '>'   -> popMode;
+SPECIAL_CLOSE :  '?>'   -> popMode;
+SLASH :   '/' ;
+EQUALS  :  '=';
+STRING  :  '"'  ~[<"]* '"'
+        |  '\'' ~[<']* '\''
+        ;
+Name    : NameStartChar NameChar*;
+S       : [ \t\r\n]    -> skip; 
+
+fragment
+HEXDIGIT : [a-fA-F0-9];
+
+fragment
+DIGIT  :  [0-9]
+
+fragment
+NameChar  : NameStartChar
+          | '-' | '.' | DIGIT
+          | '\u00B7'
+          | '\u0300' .. '\u036F'
+          | '\u203F' .. '\u2040'
+          ;
+
+fragment
+NameStartChar 
+          : [:a-zA-Z]
+          | '\u2070' .. '\u218F'
+          | '\u2C00' .. '\u2FEF'
+          | '\u3001' .. '\uD7FF'
+          | '\uF900' .. '\uFDCF'    
+          | '\uFDF0' .. '\uFFFD'
+          ;  
+```
+
+## ANTLR运行时API
+
+<!-- ANTLR 权威指南中文版 看到了412页 -->
 
 ## ANTLR4 示例
 
