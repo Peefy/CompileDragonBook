@@ -3695,7 +3695,241 @@ NameStartChar
 
 ## ANTLR运行时API
 
-<!-- ANTLR 权威指南中文版 看到了412页 -->
+### 包结构概览
+
+ANTLR运行时由六个包组成，主要的包`org.antlr.v4.runtime`中的大多数类是面向应用程序的。最长用到的是那些用于启动语法分析器分析输入文本的类。
+
+```java
+XLexer lexer = new XLexer(input);
+CommonTokenStream tokens = new CommonTokenStream(lexer);
+XParser parser = new XParser(tokens);
+ParseTree tree = parser.XstartRule();
+ParseTreeWalker walker = new ParseTreeWalker();
+MyListener listener = new MyListener(parser);
+walker.walk(listener, tree);
+```
+
+* **org.antlr.v4.runtime**-该包包含了最常用的类和接口，例如与输入流、字符和词法符号缓冲区、错误处理、词法符号构建、词法分析和语法分析相关的类体系结构
+* **org.antlr.v4.atn**-该包在ANTLR内部用于自适应`LL(*)`词法分析和语法分析策略。包名中的atn是**增强转移网络argument transition network**的缩写，它是一种能够表示语法的状态机，其中网络的边代表语法元素。在词法分析和语法分析的过程中，ANTLR沿ATN移动，并基于前瞻符号作出预测。
+* **org.antlr.v4.runtime.dfa**-使用ATN进行决策的代价很高，因此ANTLR在运行过程中将预测解结果缓存在确定**有限状态自动机Deterministic Finite Automata，DFA**中。该包包含了所有的DFA实现类。
+* **org.antlr.v4.runtime.misc**-该包包含各种个样的数据结构，以及最常用的`TestRig`类，已经通过grun命令使用过它。
+* **org.antlr.v4.runtime.tree**-默认情况下，ANTLR自动生成的语法分析器会建立语法分析树，该包包含实现此功能所需的全部类和接口。这些类和接口中还包括基本的语法分析树监听器、遍历器以及访问器机制。
+* **org.antlr.v4.runtime.tree.gui**-ANTLR自带一个基本的语法分析树查看器，可通过`inspect()`方法访问。也可以通过`save()`方法将语法分析树保存为PostScript格式。
+
+### 识别器
+
+ANTLR自动生成的词法分析器和语法分析器是Lexer和Parser的子类。Recognizer基类抽象了识别字符序列或词法符号序列中语言结构的概念。识别器Recognizer的数据来源是IntStream。
+
+Lexer实现了接口TokenSource，后者包含两个核心的词法分析器方法:nextToken(),getLine()和getCharPositionInLine()。按照一份ANTLR语法实现一个词法分析器并不困难。
+
+手工编写的词法分析器的核心代码如下：
+
+```java
+@Override
+public Token nextToken() {
+    while (true) {
+        if (c == (char)CharStream.EOF) 
+            return createToken(Token.EOF);
+        while (Character.isWhiteSpace(c))
+            consume();
+        startCharIndex = input.index();
+        startLine = getLine();
+        if (c == ';') {
+            consume();
+            return createToken(SEMI);
+        }
+        else if (c >= '0' && c <= '9') {
+            while (c >= '0' && c <= '9')
+                consume();
+            return createToken(INT);
+        }
+        else if (c >= 'a' && c <= 'z') {
+            while (c >= 'a' && c <= 'z')
+                consume();
+            return createToken(ID);
+        }
+        consume();
+    }
+}
+
+protected Token createToken(int ttype) {
+    String text = null;
+    Pair<TokenSource, CharStream> source = new Pair<>(this, input);
+    return factory.create(source, ttype. text. Token.DEFAULT_CHANNEL, starCharIndex, input.index() - 1, startLine, startCharPositionInLine);
+}
+
+protected void consume() {
+    if (c == '\n') {
+        line += 1;
+        charPositionInLine = 0;
+    }
+    if (c != (char)CharStream.EOF) 
+        input.consume();
+    c = (char)input.LA(1);
+    charPositionInLine += 1;
+}
+```
+
+### 输入字符流和词法符号流
+
+在最高层次的抽象中，词法分析器和语法分析器的主要工作都是分析整数输入流。词法分析器处理字符(短整数型)，语法分析器处理词法符号类型(整数型)。
+
+类和接口继承关系如下
+
+```
+                         -> BufferedTokenStream    -> CommonTokenStream 
+IntStream -> TokenStream -> UnbufferedTokenStream
+          -> CharStream  -> ANTLRInputStream     -> ANTLRFileStream
+                         -> UnbufferedCharStream       
+```
+
+IntStream接口定义了流的大部分操作，包括消费符号以及获取前瞻符号的方法，即consume()和LA()。由于ANTLR识别器需要向前扫描并倒回原先的位置，IntStream还定义了mark()和seek()方法。
+
+CharStream和TokenStream子接口增加了从流中提取文本的方法。实现它们的类通常会一次读取全部输入并将它们缓存起来。这种方案使得类的编写和访问输入更为容易，同时也更符合常见情况。如果输入过于庞大无法缓存，可以使用UnbufferedTokenStream和UnbufferedCharStream 
+
+### 词法符号和词法符号工厂
+
+词法分析器和字符流分解成若干词法符号对象，语法分析器则尝试将语法结构应用于生成的词法符号流之上。通常，认为词法符号被创建之后就不再改变，然而有些时候，需要在创建词法符号之后修改它们的某些字段。
+
+```
+Token -> WritableToken -> CommonToken
+```
+
+若要实现自己的词法符号，继承CommonToken类即可。为了让词法分析器生成这样的特殊词法符号，需要新建一个工厂对象，将其传给词法分析器，并通知语法分析器，使得它的错误处理器能够在必要时候生成正确类型的词法符号。
+
+```
+TokenFactory -> CommonTokenFactory
+```
+
+```java
+public class MyTokenFactory implements TokenFactory<MyToken> {
+
+}
+
+ANTLRInputStream input = new ANTLRInputStream(args[0]);
+MyTokenFactory factory = new MyTokenFactory(input);
+lexer.setTokenFactory(factory);
+parser.setTokenFactory(factory);
+```
+
+### 语法分析树
+
+Tree接口定义了一棵包含数据和子节点的树。SyntaxTree是一种如何将TokenStream中的词法符号组装成树节点的树。
+
+ParseTree代表语法分析树中的一个节点。能够返回自己的所有后代中叶子节点包含的文本。RuleNode和TerminalNode对应着子树的根节点和叶子节点。
+
+```
+Tree -> SyntaxTree -> ParseTree -> RuleNode    -> RuleContext -> ParserRuleContext
+                                -> TerminalNode -> ErrorNode
+                                                -> TerminalNodeImpl -> ErrorNodeImpl
+```
+
+RuleContext对象记录了一条规则的调用过程，通过getParent()链，可以获得调用的上下文。ParserRuleContext包含一个字段，用于在语法分析器建立新子树时追踪其子节点。它们是树节点的主要实现类，ANTLR基于它们，为语法中的每条规则生成一个特殊的子类。
+
+### 错误监听器和监听策略
+
+与ANTLR的语法错误处理机制相关的关键接口有两个:ANTLRErrorListener和ANTLRErrorStrategy。监听器郁怒修改错误消息和输出的位置。可以通过实现不同的策略，来改变语法分析器对应错误的方式。
+
+```
+ANTLRErrorListener -> BaseErrorListener -> ConsoleErrorListener
+                                        -> DiagnosticErrorListener
+                   -> ProxyErrorListener
+
+ANTLRErrorStrategy -> DefaultErrorStrategy -> BailErrorStrategy
+```
+
+ANTLR根据错误的具体类型，抛出特定的RecognitionException。需要注意的是，它们不受检的运行时异常(unchecked runtime exception)，所以无须在方法上大量的throws语句。
+
+```
+java.lang.RuntimeException -> RecognitionException -> FailedPredicateException
+                                                   -> InputMismatchException
+                                                   -> LexerNoviableAltException
+                                                   -> NoViableAltException
+```
+
+### 提高语法分析器的速度
+
+ANTLR 4的自适应语法分析策略功能比ANTLR 3更加强大，不过是以少量的性能损失为代价的。如果想要块的速度和少的内存占用，可以使用两步语法策略：
+
+* 第一步使用功能稍弱的语法分析策略----`SLL(*)`
+* 如果第一步失败，那么必须使用全功能的`LL(*)`语法分析
+
+如果第二步失败，那就意味着一个真正的语法错误。
+
+```java
+parser.getInterpreter.setSLL(true);
+parser.removeErrorListeners();
+parser.setErrorHandler(new BailErrorStrategy());
+try {
+    parser.startRule();
+}
+catch (RuntimeException ex) {
+    if (ex.getClass() == RuntimeException.class && ex.getCause() instanceof RecognitionException) {
+        tokens.reset();
+        parser.addErrorListener(ConsoleErrorListener.INSTANCE);
+        parser.setErrorHandler(new DefaultErrorStrategy());
+        parser.getInterpreter().setSLL(false);
+        parser.startRule();
+    }
+}
+```
+
+### 无缓冲的字符流和词法符号流
+
+因为ANTLR的识别器在默认情况下会将输入的完整字符流和全部词法符号放入缓冲区，所以它无法处理大小超过内存的文件，也无法处理类似套接字socket连接之类的无限输入流。可以使用字符流和词法符号流的无缓冲版本，它们使用一个滑动窗口来处理流。
+
+一个CSV语法的变体，计算一个文件中两列浮点数的和:
+
+```antlr
+grammar CSV;
+
+@members {
+    double x, y;
+}
+
+file : row+ {System.out.printf("%f, %f\n", x, y);};
+
+row : a=field ',' b=field '\r'? '\n' 
+    {
+        x += Double.valueof($a.start.getText());
+        y += Double.valueof($b.start.getText());
+    };
+
+field : TEXT;
+
+TEXT : ~[,\n\r]+ ;
+```
+
+关闭ANTLR缓冲功能的三个步骤：
+
+* 使用无缓冲的流代替常见的ANTLRFileStream和CommonTokenStream
+* 给词法分析器传递一个词法符号工厂，将输入流的字符拷贝到生成的词法符号中去
+* 阻止语法分析器建立语法分析树。
+
+```java
+CharStream input = new UnbufferedCharStream(is);
+CSVLexer lex = new CSVLexer(input);
+lex.setTokenFactory(new CommonTokenFactory(true));
+TokenStream tokens = new UnbufferedTokenStream<CommonToken>(lex);
+CSVParser parser = new CSVParser(tokens);
+parser.setBuildParseTree(false);
+parser.file();
+```
+
+### 修改ANTLR的代码生成机制
+
+ANTLR使用两种辅助工具来生成代码：
+
+* 一组StringTemplate文件（包含模版）
+* 一个称为LanguageTarget的Target子类
+
+其中Language是语法的language选项，对应的StringTemplate组文件是org/antlr/v4/tool/templates/codegen/Language.stg。若希望修改Java的代码生成模版，拷贝并修改org/antlr/v4/tool/templates/codegen/Java.stg，将它放在ANTLR的jar包之前的CLASSPATH中。ANTLR使用资源加载器获取这些模版，这样，它就能找到修改后的版本。
+
+模版仅仅用于生成特定语法对应的代码，而大多数的常用功能位于运行库中。所以Lexer和Parser都是运行库的一部分。
+
+## 移除直接左递归
+
+<!-- ANTLR 权威指南中文版 看到了436页 -->
 
 ## ANTLR4 示例
 
