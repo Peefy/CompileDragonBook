@@ -3986,7 +3986,523 @@ expr[int _p] :   // _p是预期的最低优先级
 
 ### 语法词汇表
 
-<!-- ANTLR 权威指南中文版 看到了446页 -->
+#### 注释
+
+ANTLR支持单行、多行、以及Javadoc风格的注释
+
+```antlr
+/**
+ * 注释
+ */
+
+grammar T;
+
+/*  多行
+  注释
+*/
+
+/** 注释 */
+INT : [0-9]+  // 注释
+```
+
+#### 标识符
+
+词法符号名和词法规则名总是以大写字母开头，文法规则总是以小写字母开头
+
+```antlr
+ID, LPAREN, RIGHT_CURLY // 词法符号和词法规则名
+expr, simpleDeclarator, d2, header_file // 文法规则名
+```
+
+与java类似，ANTLR允许标识符中出现Unicode字符。
+
+#### 文本常量
+
+ANTLR不区分字符常量和字符串常量，所有的文本常量都是由单引号括起来的字符串，如`';'`,`'if'`,`'\"'`等。
+
+文本常量可以包含`\uXXXX`形式的Unicode转义序列，也能够识别常见的转义序列:'\n','\r','\t','\b','\f'，或者直接使用它们的Unicde转义形式。
+
+ANTLR生成的识别器假定语法中的字符都是Unicode字符。ANTLR运行库根据目标语言对输入文件的编码作出假设。例如，对于目标语言是Java的情况，运行库假定输入文件为UTF-8编码。可以使用一些类的构造器来制定编码，比如ANTLRFileStream
+
+#### 动作
+
+动作是使用目标语言编写的代码块。可以在语法中的很多位置使用动作，它们的格式是相同的：有花括号包围的任意文本。内嵌代码可以出现在以`@header`和`@members`命名的动作，词法和文法规则、指定异常捕获区、文法规则的属性区域（返回值、参数以及局部变量），以及一些规则元素的选项（当前只有判定）中。
+
+#### 关键字
+
+ANTLR语法中的保留关键字：import,fragment,lexer,parser,grammar,returns,locals,throws,catch,finally,mode,options,tokens。另外，不要使用目标语言中的关键字作为词法符号、标签或者规则名。
+
+### 语法结构
+
+一份语法由一个语法声明和紧随其后的若干条规则构成，具有如下的通用形式：
+
+```antlr
+grammar Name;
+options {}
+import ;
+tokens {}
+@actionname {}
+
+<<rule1>>
+<<rule2>>
+...
+<<rulen>>
+```
+
+不带前缀的语法声明是混合语法，可以同时包含词法规则和文法规则，还可以使用单独词法和语法
+
+```antlr
+parser grammar Name;
+```
+
+```antlr
+lexer grammar Name;
+```
+
+*注意：只有词法规则语法才能包含模式声明*
+
+#### 语法导入
+
+语法导入`import`允许将语法分解成可复用的逻辑但愿。ANTLR处理被导入的语法的方式和面向对象语言中的父类非常相似。一个语法会从其导入的语法中继承所有的规则、词法符号声明和具名的动作。位于主语法中的规则将会覆盖其导入的语法中的规则，以此来实现继承机制。
+
+如果其中存在词法符号声明，主语法会将其合并到词法符号集合中。任意的具名动作，如@members同样也会被合并。通常，应当避免将具名的动作放在被导入语法中的所有选项(options)。
+
+被导入的语法可以导入其他语法。ANTLR按照深度优先的策略处理所有被导入的语法
+
+* 词法语法能导入词法语法
+* 句法语法能导入句法语法
+* 混合语法能导入词法语法或者句法语法
+
+ANTLR将被导入的规则放置在主语法的词法规则列表的末尾。这意味着，主语法中的词法规则具有比被导入语法中的规则更高的优先级。
+
+#### 词法符号声明
+
+tokens区域存在的意义在于，它定义了一份语法所需，但却未在本语法中列出对应规则的词法符号。大多数情况下，tokens区域用于定义本语法中动作所需的词法符号类型
+
+```antlr
+tokens {BEGIN, END, IF, THEN, WHILE}
+@lexer::membors {
+    Map<String, Integer> keywords = new HashMap<String, Integer>() {{
+        put("begin", KeywordsParser.BEGIN);
+        put("end", KeywordsParser.END);
+        put("if", KeywordsParser.IF);
+        put("then", KeywordsParser.THEN);
+        put("while", KeywordsParser.WHILE);
+    }};
+}
+```
+
+tokens区域实际上仅仅是一些会被合并到整体词法符号集合中的词法符号定义。
+
+#### 语法级别的动作
+
+当前对于Java目标语言而言，只有两种动作，header和members。前者用于将代码注入生成的识别类中的类声明之前，后者用于将代码注入为识别类的字段和方法。
+
+对于混合语法，ANTLR同时将这些代码注入到词法分析器和语法分析器中。`@parser::name` 或者 `@lexer::name`
+
+### 文法规则
+
+语法分析器由一系列文法规则组成，这些规则既可以位于文法语法中，也可以位于混合语法中。Java程序通过调用ANTLR自动生成的，与预期的起始规则相对应的函数来启动语法分析器。规则最基本的形式是规则后面紧接着一个备选分支，然后是一个分号。
+
+```antlr
+stat: retstat
+    | 'break' ';'
+    | 'continue' ';'
+    ;
+```
+
+备选分支是一组可以为空的规则元素列表。例如，下列规则中的空备选分支使得整条规则成为了可选的：
+
+```
+superClass
+    : 'extends' ID
+    |
+    ;
+```
+
+#### 备选分支的标签
+
+可以使用`#`给最外层的备选分支添加标签，以获得更加精确的语法分析器监听器事件。一条规则中的备选分支要么全部带上标签，要么全部不带标签。
+
+```antlr
+grammar AltLabels;
+stat : 'return' e ';' # Return
+     | 'break' ';'    # Break
+     ;
+e    : e '*' e        # Mult
+     | e '+' e        # Add
+     | INT            # Int
+     ;
+```
+
+备选分支的标签无须位于行尾，`#`后的空格也不是必需的。ANTLR为每个标签生成一个规则上下文类。如果一个分选分支名与另外一条规则名产生冲突，ANTLR会提示出错。
+
+#### 规则上下文对象
+
+ANTLR为每个规则引用生成规则上下文对象（即语法分析树节点）的访问方法。对于只包含一条规则引用的规则，ANTLR会生成一个无参方法。
+
+```antlr
+inc : e '++' ;
+```
+
+在规则中包含不止一个规则引用时，ANTLR也提供了对各上下文对象访问的支持。
+
+ANTLR生成一个单参数方法，其参数是访问第i个规则元素时的索引值，另外它还生成一个方法，返回该规则对应的所有上下文对象。
+
+如果另外一条规则s引用了field，可以通过内嵌动作来访问:
+
+```antlr
+s : field
+    {
+        List<EContext> x = $field.ctx.e();
+    }
+```
+
+#### 规则元素标签
+
+可以使用`=`符号给规则元素增加标签，以此为规则上下文对象增加字段
+
+```antlr
+stat
+    : 'return' value=e ';'  # Return
+    | 'break' ';'           # Break
+    ;
+```
+
+这里的value就是规则e的返回值，而e是在别处定义的。
+
+标签会成为对应的语法分析树节点类的字段。value标签成为ReturnContext类的字段，因为Return标签的存在：
+
+```java
+public static class ReturnContext extends StatContext {
+    public EContext value;
+}
+```
+
+可以使用`+=`列表标签(list label)符号来方便地获取一组词法符号。
+
+```antlr
+array : '{' el+=INT (',' el+=INT)* '}';
+```
+
+ANTLR在相应的规则上下文类中生成了一个List字段:
+
+```java
+public static class ArrayContext extends ParserRuleContext {
+    public List<Token> el = new ArrayList<Token>();
+}
+```
+
+标签列表也适用于规则引用
+
+```antlr
+elist : expr+=e (',' exprs+=e)* ;
+```
+
+#### 规则元素
+
+规则元素指明了语法分析器在特定的时间需要完成的任务，正如编程语言中的语句一样。规则元素可以是一条规则、一个词法符号或者一个字符串常量，例如expression、ID和'return'。下表是规则元素的所有可行值
+
+用法|描述
+-|-
+`T`|在当前输入位置上匹配词法符号`T`。词法符号总是以大写字母开头
+`'literal'`|在当前输入位置上匹配字符串常量。一个字符串常量就是一个由固定字符串组成的词法符号
+`r`|在当前输入位置上匹配规则`r`，这相当于像函数一样调用该规则。文法规则名总是以小写字母开头
+`r[<<args>>]`|在当前输入位置上匹配`r`，并且像函数调用一样传递一组参数。方括号中的参数格式依目标语言而定，通常是一组由逗号分隔的表达式列表
+`{<<action>>}`|在前一个备选分支元素之后，后一个备选分支元素之前执行一段动作代码。动作中的代码符合目标语言的语法。ANTLR原封不动地将这些动作代码拷贝到生成的类中，除了其中的属性占位符和词法符号引用,如`$x`和`$x.y`
+`{<<p>>}?`|执行语义判定`<<p>>`。在运行时，如果`<<p>>`的结果为假值，那么停止对该判定之后的部分进行语法分析。判定多用在预测的场合中，当ANTLR需要区分多个备选分支时，它动态地开启或关闭其对应的某个备选分支。
+`.`|匹配任意除文件结束符之外的语法符号。它被称为通配符(wildcard)
+
+当需要匹配除了一个/一组词法符号之外的任何东西时，使用`~`非运算符。该运算符很少被用于语法分析器中，尽管这是可行的。`~INT`匹配除INT之外的任意词法符号,`~','`匹配除逗号之外的任意词法符号。`~(INT|ID)`匹配除INT或ID之外的任意词法符号。词法符号、字符串常量以及语义判定这些规则元素可以携带选项(option)。
+
+#### 子规则
+
+一条规则可以包含称为子规则的备选分支块(即扩展巴克斯-诺尔范式,Extend BNF Notation, EBNF)。子规则和规则相似，只是缺少名字并包裹在圆括号内。在自规则的括号内，可以包含一个或者多个备选分支。子规则不能像规则一样使用local和return定义属性。
+
+* `?`:匹配至多一次
+* `*`:匹配零次或多次
+* `+`:匹配一次或多次
+
+作为简写，在子规则仅包含一个备选分支时，可以忽略子规则两侧的括号。例如`ann+`和`(ann)+`相同，`ID+`和`(ID)+`相同。简写的方式也适用于标签。`ids+=INT+`会生成一列INT对象。
+
+#### 捕获异常
+
+当在一条规则中发生语法错误时，ANTLR会捕获该异常，报告错误，并试图从中恢复(可能通过消费更多的词法符号来完成此过程)，然后从规则中返回。每条规则都包裹在一个`try/catch/finally`语句中。
+
+```java
+void r() throws RecognitionException {
+    try {
+        <<rule-body>>
+    }
+    catch (RecognitionException re) {
+        _errHandler.reportError(this, re);
+        _errHandler.recover(this, re);
+    }
+    finally {
+        exitRule();
+    }
+}
+```
+
+想要修改单单条规则的异常处理机制，可以在规则定义后指定一个异常。
+
+```antlr
+r   : ...
+    ;
+    catch[RecognitionException e] { throw e; }
+```
+
+这个例子展示了如何避免使用默认的错误报告和处理机制。r抛出的异常应当被更高层的规则所报告。指定任意异常都会令ANTLR不再生成默认的处理RecognitionException的代码。
+
+```antlr
+r   : ...
+    ;
+    catch[FailPredicateException fpe] { ... }
+    catch[RecognitionException e] { ... }
+```
+
+在花括号中的代码片段以及作为“参数”的异常必须使用目标语言编写----在这个例子中就是Java。可将即使异常发生也需要执行的动作代码放入finally语句中。
+
+```antlr
+r   : ...
+    ;
+    // 首先是catch语句块
+    finally { System.out.println("exit rule r"); }
+```
+
+finally语句会在规则返回时触发的exitRule()之前执行。如果需要在规则完成对备选分支的匹配之后，清理工作开始之前执行一段动作代码，可以使用after。
+
+五种ANTLR异常规则：
+
+* RecognitionException -> 
+* FailedPredicateException
+* InputMismatchException
+* LexerNoviableAltException
+* NoViableAltException
+
+### 规则属性定义
+
+需要了解许多与规则和动作相关的语法元素。规则可以像编程语言中的函数一样，包含参数、返回值以及局部变量。ANTLR会将定义的所有变量收集起来并存储到规则上下文对象中，这些变量通常称为属性。下面的通用形式展示了所有可行的属性定义位置：
+
+```antlr
+rulename[<<args>>] returns [<<retvals>>] locals [<<localvars>>] : ... ;
+```
+
+定义在`[...]`中的属性的使用方法和其他任意变量一样。下面的示例规则将参数值传递给返回值：
+
+```antlr
+add[int x] returns [int result] : '+=' INT 
+    { $result = $x + $INT.int; };
+```
+
+在语法层面上，可以指定规则级的具名动作。这样的有效命名包括init和after。语法分析器在试图匹配相应规则之前执行init动作，在结束对相应的匹配之后立即执行after工作。ANTLR的after动作不会作为自动生成的规则函数的finally代码块的一个部分。可以使用ANTLR的finally动作来放置在规则函数的finally块中执行的代码。
+
+```antlr
+row[String[] columns] returns [Map<String, String> values]
+locals [int col = 0]
+@init {
+    $value = new HashMap<String, String>();
+}
+@after {
+    if ($value != null && $values.size() > 0) {
+        System.out.println("values = " + $values);
+    }
+}
+```
+
+row规则接受参数columns，返回values，且定义了局部变量col。方括号中的内容将直接拷贝到生成的代码里。
+
+```java
+public class CSVParser extends Parser {
+    public static class RowContext extends ParserRuleContext {
+        public String[] columns;
+        public Map<String, String> values;
+        public int col = 0;
+    }
+}
+```
+
+生成的规则函数的参数即规则的参数，它们已经被拷贝到了局部的RowContext对象中。
+
+```java
+public class CSVParser extends Parser {
+    public final RowContext _localctx = new RowContext(_ctx, 4, columns);
+    enterRule(_localctx, RULE_row);
+}
+```
+
+ANTLR能够自动分析嵌套在动作中的`[...]`，因此`String[] columns`能够得到正确的解析。它也能分析出尖括号，所以泛型参数中的逗号不会被错误解析成属性的分隔符。例如，`Map<String, String>`是一个属性定义。
+
+一个动作可以包含多个属性，即使是作为返回值的动作。在同一段动作代码中，使用逗号分隔多个属性。
+
+```antlr
+a[Map<String, String> x, int y] : ...;
+```
+
+ANTLR将上述代码解析为两个参数x和y。
+
+```java
+public final AContext a(Map<String, String> x, int y) throws RecognitionException {
+    AContext _localctx = new AContext(_ctx, 0, x, y);
+    enterRule(_localctx, RULE_a);
+}
+```
+
+#### 起始规则和文件结束符
+
+起始规则是语法分析器最初应用的规则，它对应的规则函数被语言类应用程序所调用。例如，一个解析Java的语言类应用程序可能会调用parser.compliationUnit()，其中的parser是一个JavaParser对象。语法中的任意规则都可以作为起始规则。
+
+起始规则不需要消费全部的输入文本。它们只消费能够匹配本规则的备份分支之一的、尽可能多的输入文本。例如，下列规则能够根据输入情况，自动匹配一个、两个或三个词法符号：
+
+```antlr
+s : ID
+  | ID '+'
+  | ID '+' INT
+  ;
+```
+
+对于`a+3`，规则s匹配第三个备选分支。对于`a+b`，它匹配第二个备选分支，忽略b。对于`a b`，它匹配第一个备选分支，忽略`b`。在后两个例子中，语法分析器并没有消费掉全部的输入文本，因为规则s并没有明确指明，文件结束符必须出现在匹配的备选分支之后。
+
+另一方面，描述整个输入文件的规则应该引用特殊的预定义词法符号EOF。下列规则是一份语法的一部分，它负责读取配置文件：
+
+```antlr
+config : element*; // 能够“匹配”带有无效内容的输入文本
+```
+
+无效输入会使config不匹配任何输入，立即返回，且不报告错误，下面是正确的用法：
+
+```antlr
+file : element* EOF;  // 不要提前结束，必须匹配所有输入文本
+```
+
+### 动作和属性
+
+动作是以目标语言编写的，位于花括号中的文本块，识别器根据它们在语法中的位置，在不同的时机触发之。例如，下列规则在语法分析器发现有效的定义后，打印出found a decl
+
+```antlr
+decl : type ID ';' {System.out.println("found a decl");};
+type : 'int' | 'float';
+```
+
+大多数情况下，动作会访问特定词法符号和规则引用的属性。
+
+```antlr
+decl : type ID ';'
+       {System.out.println("var "+$ID.text+":"+$type.text+";");}
+     | t=ID id=ID ';'
+       {System.out.println("var "+$id.text+":"+$t.text+";");}
+     ;
+```
+
+#### 词法符号属性
+
+所有的词法符号都包含一组预定义的只读属性。这些属性包括一些有用的数据，例如词法符号类型以及其匹配的文本。动作可以通过`$label.attribute`方式访问这些属性，其中`label`代表一个特定的词法符号。通常情况下，一个特定的词法符号在规则中只会出现一次，此时，在动作中，用词法符号名来引用它是不会产生歧义的。下面的例子展示了词法符号的属性表达式的用法：
+
+```antlr
+r   : INT {int x = $INT.line;}
+      ( ID {if ($INT.line == $ID.line) ...; } )?
+      a=FLOAT b=FLOAT {if ($a.line == $b.line) ...;}
+    ;
+```
+
+`(...)?`子规则中的动作能够访问到自己之前的外层INT词法符号。其中，由于存在两个FLOAT词法符号引用，动作中的`$FLOAT`并不是唯一的，必须使用标签来指定欲访问的词法符号引用。
+
+在不同的备选分支中，相同的词法符号引用是唯一的，因为在任何规则的调用中，它们之中只有一个会得到匹配。例如，在下列规则中，两个备选分支的动作都可以直接引用$ID，而无须使用标签。
+
+```antlr
+r   : ... ID {System.out.println($ID.text);}
+    | ... ID {System.out.println($ID.text);}
+    ;
+```
+
+想要访问字符串常量匹配的词法符号，则必须使用标签。
+
+```antlr
+stat:  r='return' expr ';' {System.out.println("line="+$r.line);};
+```
+
+大多数情况下需要访问的都是词法符号的属性，不过有时候也需要访问Token对象本身，因为它聚合起了所有的属性。此外，可以使用它来测试一条可选的子规则是否匹配到了一个词法符号。
+
+```antlr
+stat: 'if' expr 'then' stat (el='else' stat)?
+      {if ($el!=null) System.out.println("found an else"); }
+    | ...
+    ;
+```
+
+`$T`和`$l`分别为解析成名为T的词法符号和标签为l的词法符号。`$ll`会被解析成列表标签II对应的`List<Token>`。`$T.attr`会被解析成类型为T的词法符号。
+
+词法属性attr对应的类型和值
+
+属性|类型|描述
+-|-|-
+text|String|词法符号匹配到的文本，它会被替换成getText()方法调用。例如$ID.text
+type|int|词法符号对应的正整数类型值，如INT。它会转换成getType()方法调用。例如$ID.type
+line|int|词法符号所处的行号，从1开始计数。它会被转换成getLine()方法调用，例如$ID.line
+pos|int|词法符号的第一个字符在行内的位置，从0开始计数。它会被转换成getCharPositionInLine()方法调用。例如：$ID.pos
+index|int|词法符号在词法符号流中的全局索引值，从0开始计数。它会转换成getTokenIndex()方法调用。例如：$ID.index
+channel|int|词法符号所在的通道数。语法分析器只处理一个通道的词法符号。忽略其他通道的词法符号。默认的通道是0（Token.DEFAULT_CHANNEL）,默认的隐藏通道是Token.HIDDEN_CHANNEL。它会被转换成getChannel()方法调用。例如：$ID.channel
+int|int|词法符号持有的整数值。它假设词法符号的文本是有效的数字。对于计算器之类的程序，这个属性非常有用。它会被转换成Integer.valueOf(text-of-token)。例如：$INT.int
+
+#### 文法规则属性
+
+ANTLR预定义了一系列只读的文法规则属性，供动作使用。动作只能访问自己前面的规则属性。访问名字或者标签为r的规则属性语法是$r.attr。例如，下面的$expr.text返回expr规则匹配的全部文本的内容。
+
+```antlr
+returnStat : 'return' expr {System.out.println("matched "+$expr.text);};
+```
+
+规则标签的用法如下所示：
+
+```antlr
+returnStat : 'return' e=expr {System.out.println("matched "+$e.text);};
+```
+
+也可以使用`$`后跟属性名来访问当前执行的规则的相应属性。例如，$start是当前规则的起始词法符号。
+
+```antlr
+returnStat : 'return' expr { System.out.println("first token "+$start.getText();) };
+```
+
+文法属性attr对应的类型和值
+
+属性|类型|描述
+-|-|-
+text|String|一条规则匹配的文本或者从这条规则的起始位置到$text当前位置对应的文本。需要注意的是，它包含了隐藏通道中的全部词法符号，这通常是正确的，因为其中含有全部的空白字符和注释。当作为当前规则的属性时，它可以在任何动作中使用，包括异常处理动作
+start|Token|在主要词法符号通道上被规则匹配到第一个词法符号。换句话说，该属性永远不会位于隐藏通道中。对于那些不匹配任何词法符号的规则，这个属性指向第一个后续的词法符号。当作为当前规则的属性时，它可以在规则内的任何动作中使用
+stop|Token|规则匹配到最后一个非隐藏通道的词法符号。当作为当前规则的属性时，它仅能在after和finally动作中使用
+ctx|ParseRuleContext|一条规则调用对应的规则上下文对象。通过这个属性可以访问其余全部属性。例如：$ctx.start当问当前规则上下文对象的start字段。它等价于$start。
+
+#### 动态作用域属性
+
+和通用编程语言中的函数一样，可以使用参数向规则传递信息，并使用返回值接收信息。但是，编程语言通常不允许其他函数访问局部变量或者参数。
+
+例如，在Java中，从嵌套函数中访问局部变量x是非法的：
+
+```java
+void f() {
+    int x = 0;
+    g();
+}
+
+void g() {
+    h();
+}
+
+void h() {
+    int y = x; // 对函数f中的局部变量x的非法引用
+}
+```
+
+变量x只能在f()的作用域中使用，该作用域是由花括号所决定的词法作用域。因此，Java的作用域是词法作用域。词法作用域是大多数编程语言采用的方案。允许方法沿着调用链向上访问之前定义的局部变量的编程语言被称为具有动态作用域。其中的“动态”指的是编译器无法通过静态方式决定可见的变量集合。这是由于对于一个方法而言，可见变量的集合取决于它的调用者。
+
+在语法层面上，有时候相距很远的两条规则需要进行通信，大多数情况下是为了向调用链之下的规则提供上下文信息。ANTLR允许这样的动作中的动态作用域，即使用`$r::x`访问调用者规则中的属性，其中r是规则名，而x是该规则中的属性。需要开发者自行保证，r是当前规则的调用者，否则，当访问`$r::x`时，一个运行时异常会被抛出。
+
+```antlr
+grammar DynScope;
+```
+
+<!-- ANTLR 权威指南中文版 看到了479页 -->
 
 ## ANTLR4 示例
 
