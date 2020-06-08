@@ -4780,9 +4780,97 @@ ID   : [a-z]+ ;
 
 和语法判定一样，词法判定也不能依赖于词法动作的副作用。这是因为，动作是在词法分析器成功选定规则之后执行的，而判定是规则选择过程的一部分，它们不能依赖于动作的副作用。在词法规则中，动作必须出现在判定之后。例如，下面是另外一种在词法分析器中匹配enum关键字的方法：
 
+```antlr
+ENUM : [a-z]+ {getText().equals("enum")}?
+       {System.out.println("enum!");}
+ID   : [a-z]+ {System.out.println("ID " + getText());}
+     ;
+```
 
+ENUM中的打印动作出现在末尾，只有当前输入匹配`[a-z]+`和判定为真时，它才会被执行。
 
-<!-- ANTLR 权威指南中文版 看到了504页 -->
+### ANTLR 选项options
+
+有许多语法元素和规则元素级别的选项可被设定（当前，暂时还没有规则选项）。它们能够改变ANTLR根据语法生成代码的方式。通用形式如下：
+
+```antlr
+options {name1=value1;...nameN=valueN;} // 与目标语言的语法无关
+```
+
+其中的value可以是标识符、全限定标识符(如a.b.c)、字符串、花括号包围的多行字符串，以及整数。
+
+#### 语法选项
+
+所有的语法都可以使用下列选项。在混合语法中，除language之外的所有选项都只和生成的语法分析器相关。选项的设定方式是通过在语法文件中使用之前介绍的options，或者使用ANTLR命令行的-D参数传入。下面的例子展示了这两种方法的使用，需要注意的是：-D参数会覆盖语法中的options：
+
+* **superClass**-设定生成的语法分析器或词法分析器的父类。对于混合语法，它设定语法分析器的父类
+* **language**-如果可行的话，生成指定语言的代码。
+* **tokenVocab**-在遇到文件中的词法符号时，ANTLR将词法符号的类型赋予它们。如果需要使用不同的词法符号值，例如独立的词法分析器，可以使用此选项令ANTLR使用指定的".tokens"文件。ANTLR会为每个语法生成一个".tokens"文件。
+* **TokenLabelType**-在生成词法符号对象时，ANTLR通常使用Token类型。如果希望传给自定义的语法分析器和词法分析器一个能够生成自定义词法符号的TokenFactory，应当将这个选项的值设为该类型。这样可以保证上下文对象清楚地知道字段和方法的返回值类型。
+
+#### 规则选项
+
+当前，还没有有效的规则级别的选项，不过ANTLR仍然支持下列语法：
+
+```antlr
+rulename
+options {...}
+    :    ...
+    ;
+```
+
+#### 规则元素选项
+
+词法符号选项的形式是`T<name=value>`,唯一可用的词法符号选项是**assoc**,它的可行值是left和right。下例示出了左递归表达式规则指定的`^`幂运算符的词法符号选项。
+
+```antlr
+grammar ExprLR;
+
+expr : expr '^'<assoc=right> expr
+     | expr '*' expr
+     | expr '+' expr
+     | INT
+     ;
+
+INT  : '0' .. '9'
+WS   : [ \n]+ -> skip;
+```
+
+语义判定也能接收选项，每个“捕获失败的语义判定”能够接收一个选项。唯一可用的选项是fail选项，它的值可以是双引号包围的字符串常量值，也可以是求值结果为字符串的动作。该字符串，或者说动作的结果字符串应当是相应判定失败后输出的消息。
+
+```antlr
+ints[int max]
+locals [int i = 1]
+    : INT (',' {$i++;} {$i<=$max}?<fail={"exceeded max "+$max}> INT )*
+    ;
+```
+
+当判定失败时，动作可以在执行一个函数的同时返回字符串，如:`{...}? <fail={doSomething-AndReturnAString()}>`
+
+#### ANTLR命令行参数
+
+```cmd
+ANTLR Parser Generator  Version 4.8
+ -o ___              specify output directory where all output is generated 指定所有的生成文件的输出位置
+ -lib ___            specify location of grammars, tokens files  指定语法和tokens文件的位置
+ -atn                generate rule augmented transition network diagrams 生成规则增强转移网络图
+ -encoding ___       specify grammar file encoding; e.g., euc-jp 指定语法文件的编码，例如euc-jp
+ -message-format ___ specify output style for messages in antlr, gnu, vs2005 指定消息的输出风格：antlr/gun/vs2005
+ -long-messages      show exception details when available for errors and warnings  
+ -listener           generate parse tree listener (default) 生成语法分析树监听器
+ -no-listener        don't generate parse tree listener 不生成语法分析树监听器
+ -visitor            generate parse tree visitor 生成语法分析树访问器
+ -no-visitor         don't generate parse tree visitor 不生成语法分析树访问器(default)
+ -package ___        specify a package/namespace for the generated code 指定生成代码的包
+ -depend             generate file dependencies 生成文件依赖
+ -D<option>=value    set/override a grammar-level option 设定/覆盖一个语法级的选项
+ -Werror             treat warnings as errors 将警告当作错误处理
+ -XdbgST             launch StringTemplate visualizer on generated code 对生成的代码启动StringTemplate 可视化器
+ -XdbgSTWait         wait for STViz to close before continuing 
+ -Xforce-atn         use the ATN simulator for all predictions 对所有的预测启动ATN模拟器
+ -Xlog               dump lots of logging info to antlr-timestamp.log 将详细日志保存为antlr-timestamp.log
+ -Xexact-output-dir  all output goes into -o dir regardless of paths/package
+```
 
 ## ANTLR4 示例
 
