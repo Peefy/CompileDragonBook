@@ -1,0 +1,6 @@
+
+start : "{" value ("," value)*  "}" 
+value : start | INT
+INT:  /[0-9]+/    
+          
+%ignore " "

@@ -1,11 +1,9 @@
 from lark import Lark
 
-l = Lark('''
-            start: WORD "," WORD "!"
-            %import common.WORD   // imports from terminal library
-            %ignore " "           // Disregard spaces in text
-         ''')
+LARK_NAME = './src/lark/hello.lark'
 
-print( l.parse("Hello, World!") )
+with open(LARK_NAME) as fs:
+   l = Lark(fs)
+   print( l.parse("Hello, World!") )
 
 
