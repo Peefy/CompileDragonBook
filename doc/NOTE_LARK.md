@@ -137,7 +137,7 @@ B               : "b"
 Tree(start, [Token(A, 'a'), Token(B, 'b')])
 ```
 
-如果遇到这种情况，建议的解决方案是改用规则。例如：“
+如果遇到这种情况，建议的解决方案是改用规则。例如："
 
 ```py
 >>> p = Lark("""start: (a | b)+
@@ -292,47 +292,48 @@ NAME:   /\w+/
          | "world" -> planet
 ```
 
-## 变形金刚和访客
-变形金刚和访问者提供了一个方便的界面来处理Lark返回的解析树。
+## Lark-Parser的Transformer和Visitor
 
-通过从正确的类（访问者或转换器）继承并实现与您要处理的规则相对应的方法来使用它们。每个方法都将子级作为参数。可以使用v_args装饰器进行修改，该装饰器允许内联参数（类似于*args），或将tree meta属性添加为参数。
+Transformer和Visitor提供了一个方便的界面来处理Lark-Paresr返回的解析树。
 
-请参阅：visiters.py
+通过从正确的类（访问者或转换器）继承并实现与要处理的规则相对应的方法来使用它们。每个方法都将子级作为参数。可以使用v_args装饰器进行修改，该装饰器允许内联参数（类似于*args），或将tree meta属性添加为参数。
 
-参观者
-访客访问树的每个节点，并根据该节点的数据在树上运行适当的方法。
+### 访问者Visitor
 
-它们自下而上地工作，从叶子开始，到树的根部结束。
+访问者Visitor访问树的每个节点，并根据该节点的数据在树上调用适当的方法。
 
-例：
+它们自下而上地工作，从叶子节点开始，到树的根部结束。
 
+
+```py
 class IncreaseAllNumbers(Visitor):
   def number(self, tree):
     assert tree.data == "number"
     tree.children[0] += 1
 
 IncreaseAllNumbers().visit(parse_tree)
+```
+
 有两种实现访问者接口的类：
 
-访客-参观每个节点（无递归）
+* 访客-参观每个节点（无递归）
+* Visitor_Recursive-使用递归访问每个节点。
 
-Visitor_Recursive-使用递归访问每个节点。快一点。
+### 转换器Transformer
 
-变形金刚
-变压器访问树的每个节点，并根据该节点的数据在树上运行适当的方法。
+转换器Transformer访问树的每个节点，并根据该节点的数据在树上调用适当的方法。
 
-它们以自下而上（或：深度优先）的方式工作，从叶子开始到树的根部结束。
+它们以自下而上（或：深度优先）的方式工作，从叶子节点开始到树的根部结束。
 
-变压器可用于实现地图和缩小模式。
+Transformer可用于实现映射和缩小模式。
 
-由于节点从叶减少到根，因此回调在任何时候都可以假定子代已经转换（如果适用）。
+由于节点从叶子减少到根，因此回调在任何时候都可以假定子代已经转换（如果适用）。
 
-可以使用乘法将变压器链接到新的变压器中。
+可以使用乘法将Transformer链接到新的Transformer中。
 
-Transformer可以做任何事情都Visitor可以做，但是因为它可以重构树，所以效率稍低。
+Transformer可以做的任何事情都Visitor都可以做，但是因为它可以重构树，所以效率稍低。
 
-例：
-
+```py
 from lark import Tree, Transformer
 
 class EvalExpressions(Transformer):
@@ -343,16 +344,17 @@ t = Tree('a', [Tree('expr', ['1+2'])])
 print(EvalExpressions().transform( t ))
 
 # Prints: Tree(a, [3])
-所有这些类都实现了转换器接口：
+```
 
-变压器-递归地变换树。这可能是您想要的。
-Transformer_InPlace-非递归。就地更改树，而不是返回新实例
-Transformer_InPlaceRecursive-递归。就地更改树，而不是返回新实例
-visit_tokens
-默认情况下，转换器仅访问规则。visit_tokens=True也会告诉Transformer也访问令牌。这是的慢一点替代方法lexer_callbacks，但更易于维护，并且适用于所有算法（即使没有词法分析器也是如此）。
+下面这些类都实现了转换器接口：
 
-例：
+* Transformer-递归地变换树。这可能是想要的。
+* Transformer_InPlace-非递归。原地更改树，而不是返回新实例
+* Transformer_InPlaceRecursive-递归。原地更改树，而不是返回新实例
+  
+默认情况下，转换器仅访问规则。`visit_tokens=True`也会告诉Transformer也访问词法符号。`lexer_callbacks`是慢一点的替代方法，但更易于维护，并且适用于所有算法（即使没有词法分析器也是如此）。
 
+```py
 class T(Transformer):
     INT = int
     NUMBER = float
@@ -361,20 +363,19 @@ class T(Transformer):
 
 
 T(visit_tokens=True).transform(tree)
-v_args
-v_args 是一个装饰。
+```
 
-默认情况下，转换器/访问者的回调方法接受一个参数：节点子级的列表。v_args可以修改此行为。
+v_args 是一个装饰器。默认情况下，转换器/访问者的回调方法接受一个参数：节点子级的列表。v_args可以修改此行为。
 
 在转换器/访问者类定义上使用时，它适用于其中的所有回调方法。
 
 v_args 接受以下三个标志之一：
 
-inline-提供子项*args而不是列表参数（不建议用于很长的列表）。
-meta-提供两个参数：children和meta（而不是第一个）
-tree -提供整个树作为参数，而不是子树。
-例子：
+* inline-提供子项*args而不是列表参数（不建议用于很长的列表）。
+* meta-提供两个参数：children和meta（而不是第一个）
+* tree -提供整个树作为参数，而不是子树。
 
+```py
 @v_args(inline=True)
 class SolveArith(Transformer):
     def add(self, left, right):
@@ -385,146 +386,113 @@ class ReverseNotation(Transformer_InPlace):
     @v_args(tree=True)
     def tree_node(self, tree):
         tree.children = tree.children[::-1]
-__default__ 和 __default_token__
+```
+
+`__default__` 和 `__default_token__`
 如果未找到具有相应名称的函数，则会调用这些函数。
 
-该__default__方法具有签名(data, children, meta)，data是节点的data属性。默认情况下重建树
+* `__default__`方法具有签名`(data, children, meta)`，data是节点的data属性。默认情况下重建树
+* `__default_token__`只是需要Token作为参数。默认情况下，仅返回参数。
 
-该__default_token__只是需要Token作为参数。默认情况下，仅返回参数。
-
-丢弃
 Discard在转换器回调中引发异常时，该节点将被丢弃，并且不会出现在父节点中。
 
 ## Lark-Parser 类参考
 
-本页详细介绍了Lark中的重要类。
+### Lark 类
 
-云雀
-Lark类是该库的主要接口。对于许多不同的解析器和树构造函数，它基本上是一个薄包装。
+Lark类是该库的主要接口。对于许多不同的解析器和树构造函数。
 
-__init __（self，grammar_string，** options）
-使用给定的语法创建Lark的实例
+`__init __(self，grammar_string，**options)`使用给定的语法创建Lark的实例
 
-打开（cls，语法文件名，rel_to =无，**选项）
-使用其文件名给出的语法创建Lark的实例
+`open(cls, grammar_filename, rel_to=None, **options)`使用其文件名给出的语法创建Lark的实例。如果提供了rel_to，则函数将找到与其相关的语法文件名。
 
-如果提供了rel_to，则函数将找到与其相关的语法文件名。
-
-例：
-
+```py
     >>> Lark.open("grammar_file.lark", rel_to=__file__, parser="lalr")
     Lark(...)
-解析（自身，文本）
-返回文本的完整分析树（类型为Tree）
+```
 
-如果将变压器提供给__init__，则返回转换结果。
+`parse(self, text)`返回文本的完整分析树（类型为Tree）。如果将Transformer提供给__init__，则返回转换结果。
 
-保存（self，f）/加载（cls，f）
-对于缓存和多处理很有用。
+`save(self, f) / load(cls, f)`对于缓存和多处理很有用。save 将实例保存到给定的文件对象中，load 从给定的文件对象加载实例
 
-save 将实例保存到给定的文件对象中
+#### Lark-Parser 选项
 
-load 从给定的文件对象加载实例
+* `start`-起始符号。一个字符串，或多个可能开始的字符串列表（默认值："开始"）
+* `debug`-显示调试信息，例如警告（默认值：False）
+* `transformer` -将转换器应用于每个解析树（相当于在解析之后应用它，但速度更快）
+* `propagate_positions` -传播（行，列，end_line，end_column）属性为所有树枝。
+* `may_placeholders`-为 True时，`[]`运算符不匹配时返回`None`。-为False时， `[]`行为类似于`?`运算符，并且完全不返回任何值。-（默认= False。建议设置为True）
+* `g_regex_flags`-应用于所有词法符号（正则表达式和字符串）的标志
+* `keep_all_tokens`-防止树构建器自动删除"标点"标记（默认值：False）
+* `cache` -缓存Lark语法分析的结果，以便更快地加载x2到x3。仅适用于LALR。-当为False时，不执行任何操作（默认）-当为True时，缓存到本地目录中的一个临时文件中-当给出一个字符串时，缓存到该字符串指向的路径
 
-云雀选项
-常规选项
-start-起始符号。一个字符串，或多个可能开始的字符串列表（默认值：“开始”）
+#### Lark-Parser 算法
 
-debug-显示调试信息，例如警告（默认值：False）
+* `parser` -决定使用哪个解析器引擎`'earley'`或`'lalr'`。（默认值：`' earley'`）（旧版也有"cyk"选项）
+* `lexer`-决定算法是否使用lexer
+1. "auto"（默认）：根据解析器为我选择
+2. "standard"：使用标准词法分析器
+3. "contextual"：更强的词法分析器（仅适用于parser="lalr"）
+4. "dynamic"：灵活而强大（仅使用parser="earley"）
+5. "dynamic_complete"：与dynamic相同，但是尝试各种可能的标记化方法。（仅适用于parser="earley"）
+* `ambiguity` -决定如何处理解析中的歧义。仅当parser ="earley"-"resolve"时才相关：解析器将自动选择最简单的派生（它一致地选择：对词法符号的贪婪，对规则的非贪婪）-"显式"：解析器将返回包装在"_ambig"树节点（即森林）。
 
-转换器 -将转换器应用于每个解析树（相当于在解析之后应用它，但速度更快）
+#### 特定域
 
-propagate_positions -传播（行，列，end_line，end_column）属性为所有树枝。
+* `postlex` - Lexer后处理（默认：无）仅适用于标准和上下文词法分析器。
+* `priority` -如何评估优先级-自动，无，正常，反转（默认：自动）
+* `lexer_callbacks`-词法分析器的回调字典。词汇化过程中可能会更改标记。请谨慎使用。
+* `edit_terminals`-回调
 
-may_placeholders--为 True时，[]运算符None不匹配时返回。-当时False， []其行为类似于?运算符，并且完全不返回任何值。-（默认= False。建议设置为True）
+### Tree 类
 
-g_regex_flags-应用于所有终端（正则表达式和字符串）的标志
+* `data` -规则或别名的名称
+* `children` -匹配的子规则和词法符号列表
+* `meta`-行号和列号（如果`propagate_positions`启用）
+  o 元属性：`line`，`column`，`start_pos`，`end_line`，`end_column`，`end_pos`
 
-keep_all_tokens-防止树构建器自动删除“标点”标记（默认值：False）
+* `__init__(self, data, children)`创建一个新树，并将"数据"和"子代"存储在相同名称的属性中。
 
-缓存 -缓存Lark语法分析的结果，以便更快地加载x2到x3。仅适用于LALR。-当时False，不执行任何操作（默认）-当时True，缓存到本地目录中的一个临时文件中-当给出一个字符串时，缓存到该字符串指向的路径
+`pretty(self, indent_str=' ')`返回树的缩进字符串表示形式。非常适合调试。
 
-算法
-解析器 -决定使用哪个解析器引擎“ earley”或“ lalr”。（默认值：“ earley”）（旧版也有“ cyk”选项）
+`find_pred(self, pred)`返回评估pred(node)为true的树的所有节点。
 
-lexer-决定是否使用lexer阶段
+`find_data(self, data)`返回其数据等于给定数据的树的所有节点。
 
-“自动”（默认）：根据解析器为我选择
-“标准”：使用标准词法分析器
-“上下文”：更强的词法分析器（仅适用于parser =“ lalr”）
-“ dynamic”：灵活而强大（仅使用parser =“ earley”）
-“ dynamic_complete”：与dynamic相同，但是尝试各种可能的标记化方法。（仅适用于parser =“ earley”）
-歧义 -决定如何处理解析中的歧义。仅当parser =“ earley”-“ resolve”时才相关：解析器将自动选择最简单的派生（它一致地选择：对令牌的贪婪，对规则的非贪婪）-“显式”：解析器将返回包装在“ _ambig”树节点（即森林）。
+`iter_subtrees(self)`深度优先迭代。遍历所有子树，永远不会两次返回同一节点（Lark的解析树实际上是DAG）。
 
-特定领域
-postlex - Lexer后处理（默认：无）仅适用于标准和上下文词法分析器。
-优先级 -如何评估优先级-自动，无，正常，反转（默认：自动）
-lexer_callbacks-词法分析器的回调字典。词汇化过程中可能会更改标记。请谨慎使用。
-edit_terminals-回调
-树
-主树类
+`iter_subtrees_topdown(self)`广度优先迭代。遍历所有子树，并按照pretty()的顺序返回节点。
 
-data -规则或别名的名称
-children -匹配的子规则和终端列表
-meta-行号和列号（如果propagate_positions启用）
-元属性：line，column，start_pos，end_line，end_column，end_pos
-__init __（自己，数据，孩子）
-创建一个新树，并将“数据”和“子代”存储在相同名称的属性中。
+`__eq__`，`__hash__`可以对树进行散列和比较。
 
-漂亮（self，indent_str =''）
-返回树的缩进字符串表示形式。非常适合调试。
+### Token 类
 
-find_pred（self，pred）
-返回评估pred（node）为true的树的所有节点。
+使用词法分析器时，树中的最终标记将属于Token类，该类继承自Python的字符串。因此，正常的字符串比较和操作将按预期工作。词法符号还具有其他有用的属性：
 
-find_data（自我，数据）
-返回其数据等于给定数据的树的所有节点。
+* `type` -词法符号的名称（按语法指定）。
+* `pos_in_stream` -词法符号在文本中的索引
+* `line` -文本中词法符号的行（以1开头）
+* `column` -文本中词法符号的列（以1开头）
+* `end_line` -词法符号结束的行
+* `end_column` -词法符号结束后的下一列。例如，如果词法符号是column值为4 的单个字符，则为end_column5。
+* `end_pos` -词法符号结束处的索引（基本上是pos_in_stream + len(token)）
+  
+### Transformer/Visitor/Interpreter 类
 
-iter_subtrees（个体）
-深度优先迭代。
+[参见上一节](#lark-parser的transformer和visitor)
 
-遍历所有子树，永远不会两次返回同一节点（Lark的解析树实际上是DAG）。
+### UnexpectedInput 类
 
-iter_subtrees_topdown（个体）
-广度优先迭代。
-
-遍历所有子树，并按照pretty（）的顺序返回节点。
-
-__eq __，__ hash__
-可以对树进行散列和比较。
-
-代币
-使用词法分析器时，树中的最终标记将属于Token类，该类继承自Python的字符串。因此，正常的字符串比较和操作将按预期工作。令牌还具有其他有用的属性：
-
-type -令牌的名称（按语法指定）。
-pos_in_stream -令牌在文本中的索引
-line -文本中令牌的行（以1开头）
-column -文本中令牌的列（以1开头）
-end_line -令牌结束的行
-end_column-令牌结束后的下一列。例如，如果令牌是column值为4 的单个字符，则为end_column5。
-end_pos -令牌结束处的索引（基本上是pos_in_stream + len（token））
-变压器
-游客
-口译员
-查看访客页面
-
-意外输入
-意外的标记
-UnexpectedException
-UnexpectedInput
-UnexpectedToken -解析器收到意外的令牌
-UnexpectedCharacters -词法分析器遇到意外字符串
+* `UnexpectedToken` -解析器收到意外的词法符号
+* `UnexpectedCharacters` -词法分析器遇到意外字符串
+  
 捕获这些异常之一后，可以调用以下帮助器方法来创建更好的错误消息：
 
-get_context（文本，跨度）
-返回一个漂亮的字符串，指出文本中的错误span及其周围的上下文字符。
+`get_context(text, span)`返回一个漂亮的字符串，指出文本中的错误span及其周围的上下文字符。（解析器不保存它必须解析的文本的副本，因此必须再次提供它）
 
-（解析器不保存它必须解析的文本的副本，因此您必须再次提供它）
+`match_examples(parse_fn, examples)`允许通过与示例错误进行匹配来检测输入文本中的错误。
 
-match_examples（parse_fn，示例）
-允许您通过与示例错误进行匹配来检测输入文本中的错误。
-
-接受解析函数（通常lark_instance.parse）和的字典{'example_string': value}。
+接受解析函数（通常`lark_instance.parse`）和字典`{'example_string': value}`。
 
 该函数将迭代字典，直到找到匹配的错误，然后返回相应的值。
 
