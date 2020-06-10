@@ -1,0 +1,7 @@
+start: INT*
+
+COMMENT: /#.*/
+
+%import common (INT, WS)
+%ignore COMMENT
+%ignore WS

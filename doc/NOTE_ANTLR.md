@@ -1309,6 +1309,16 @@ DOT是一门声明式编程语言，主要用于描述网络图、树或者状�
 
 一个dot的源代码：
 
+```txt
+digraph G {
+    rankdir=LR;
+    main [shape=box];
+    main -> f -> g;         // main 调用f，f调用g
+    f -> f [style=dotted];  // f是递归的
+    f -> h;                 // f调用了h
+}
+```
+
 ```dot
 digraph G {
     rankdir=LR;
@@ -1317,6 +1327,10 @@ digraph G {
     f -> f [style=dotted];  // f是递归的
     f -> h;                 // f调用了h
 }
+```
+
+```txt
+digraph G { n -> sw; }
 ```
 
 ```dot
