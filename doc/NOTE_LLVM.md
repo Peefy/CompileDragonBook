@@ -45,6 +45,16 @@ LLVM可以使用SVN，Git完成版本控制，以及make，cmake等自动构建�
 
 ## 使用LLVM完成一个语言的前端
 
+```dot
+digraph G {
+    rankdir=LR;
+    词法分析器 [shape=box];
+    语法分析器 [shape=box];
+    中间表示 [shape=box];
+    词法分析器 -> 语法分析器 -> 中间表示;   
+}
+```
+
 ### 词法分析器
 
 比如对于简单的BASIC语言：
@@ -61,7 +71,7 @@ def fib(x)
 fib(40)
 ```
 
-在实现语言方面，首先需要的是处理文本文件并识别其内容的能力。传统方法是使用“词法分析器”（又称“扫描器”）将输入分解为“token”。词法分析器返回的每个令牌都包含令牌代码和潜在的一些元数据（例如数字的数值）。
+在实现语言方面，首先需要的是处理文本文件并识别其内容的能力。传统方法是使用“词法分析器”（又称“扫描器”）将输入分解为“token”。词法分析器返回的每个记号都包含记号代码和潜在的一些元数据（例如数字的数值）。
 
 ```ocaml
 (* The lexer returns these 'Kwd' if it is an unknown character, otherwise one of
@@ -77,7 +87,7 @@ type token =
   | Kwd of char
 ```
 
-词法分析器返回的每个词法符号都是词法变量值之一。诸如'+'之类的未知字符将作为返回 。如果当前令牌是标识符，则值为字符串。如果当前标记是数字文字（如1.0），则值为Token.Kwd '+' Token.Ident sToken.Number 1.0
+词法分析器返回的每个词法符号都是词法变量值之一。诸如'+'之类的未知字符将作为返回 。如果当前记号是标识符，则值为字符串。如果当前标记是数字文字（如1.0），则值为Token.Kwd '+' Token.Ident sToken.Number 1.0
 
 词法分析器的实际实现是由名为的函数驱动的函数的集合Lexer.lex。Lexer.lex调用该函数以从标准输入返回下一个标记
 
@@ -160,4 +170,155 @@ and lex_comment = parser
 | [< >] -> [< >]
 ```
 
-### 抽象语法树AST
+### 语法解析器
+
+#### 抽象语法树AST
+
+构建的解析器使用**递归下降解析**和**运算符优先解析**的组合来解析语言（后者用于二进制表达式，前者用于其他所有内容）。解析器的输出是**抽象语法树AST**。
+
+程序的AST捕获其行为的方式使得编译器的后续阶段（例如代码生成）易于解释。基本上希望为该语言的每个构造提供一个对象，而AST应该紧密地对该语言建模。在语言中，有表达式，原型和函数对象。将从表达式开始：
+
+```ocaml
+(* expr - Base type for all expression nodes. *)
+type expr =
+  (* variant for numeric literals like "1.0". *)
+  | Number of float
+```
+
+上面的代码显示了ExprAST基类的定义和一个用于数字文字的子类的定义。
+
+以语言的基本形式使用的其他表达AST节点定义：
+
+```ocaml
+(* variant for referencing a variable, like "a". *)
+| Variable of string
+
+(* variant for a binary operator. *)
+| Binary of char * expr * expr
+
+(* variant for function calls. *)
+| Call of string * expr array
+```
+
+`Variable`变量捕获变量名，`Binary`二进制运算符捕获其操作码（例如'+'），`Call`调用捕获函数名以及任何参数表达式的列表。
+
+对于基本语言，这些都是我定义的所有表达节点。因为它没有条件控制流，所以它不是图灵完备的。
+
+```ocaml
+(* proto - This type represents the "prototype" for a function, which captures
+ * its name, and its argument names (thus implicitly the number of arguments the
+ * function takes). *)
+type proto = Prototype of string * string array
+
+(* func - This type represents a function definition itself. *)
+type func = Function of proto * expr
+```
+
+函数仅以其参数数量来输入。由于所有值都是双精度浮点数，因此每个参数的类型都不需要存储在任何地方。用一种更具攻击性和现实性的语言，“expr”变体可能会有一个类型字段。
+
+#### 分析器基础
+
+需要定义解析器代码来构建AST。比如想要将类似“x + y”（由词法分析器作为三个标记返回）的内容解析为可以通过如下调用生成的AST：
+
+```ocaml
+let x = Variable "x" in
+let y = Variable "y" in
+let result = Binary ('+', x, y) in
+...
+```
+
+错误处理例程利用了内置函数，当解析器无法在模式的第一个位置中找到任何匹配的记号时，将引发错误处理例程Stream.Failure。 当第一个记号匹配时引发，其余的不匹配。
+
+#### 基本的表达式分析
+
+对于语法中的每个产生式，将定义一个解析该产生式的函数，并将此类表达式称为“主要”表达式。比如，对于数字表达式：
+
+```ocaml
+(* primary
+ *   ::= identifier
+ *   ::= numberexpr
+ *   ::= parenexpr *)
+parse_primary = parser
+  (* numberexpr ::= number *)
+  | [< 'Token.Number n >] -> Ast.Number n
+```
+
+以上例程期望在当前记号是`Token.Number`记号时被调用。它采用当前数字值，创建一个`Ast.Number`节点，将词法分析器移至下一个标记，最后返回。
+
+括号运算符的定义如下：
+
+```ocaml
+(* parenexpr ::= '(' expression ')' *)
+| [< 'Token.Kwd '('; e=parse_expr; 'Token.Kwd ')' ?? "expected ')'" >] -> e
+```
+
+下一个简单的生产式是用于处理变量引用和函数调用：
+
+```ocaml
+(* identifierexpr
+ *   ::= identifier
+ *   ::= identifier '(' argumentexpr ')' *)
+| [< 'Token.Ident id; stream >] ->
+    let rec parse_args accumulator = parser
+      | [< e=parse_expr; stream >] ->
+          begin parser
+            | [< 'Token.Kwd ','; e=parse_args (e :: accumulator) >] -> e
+            | [< >] -> e :: accumulator
+          end stream
+      | [< >] -> accumulator
+    in
+    let rec parse_ident id = parser
+      (* Call. *)
+      | [< 'Token.Kwd '(';
+           args=parse_args [];
+           'Token.Kwd ')' ?? "expected ')'">] ->
+          Ast.Call (id, Array.of_list (List.rev args))
+
+      (* Simple variable ref. *)
+      | [< >] -> Ast.Variable id
+    in
+    parse_ident id stream
+```
+
+如果接收到了没想到的记号，则会引发异常：
+
+```ocaml
+| [< >] -> raise (Stream.Error "unknown token when expecting an expression.")
+```
+
+#### 二进制表达式解析
+
+例如，当给定字符串“x + y * z”时，解析器可以选择将其解析为“(x + y) * z”或“ x + (y * z)”。使用数学上的通用定义，因为“*”（乘法）的优先级高于“+”（加法）的优先级。
+
+有很多方法可以解决此问题，但是一种优雅而有效的方法是使用Operator-Precedence Parsing。此解析技术使用二进制运算符的优先级来指导递归。首先，需要一个优先级表：
+
+```ocaml
+(* binop_precedence - This holds the precedence for each binary operator that is
+ * defined *)
+let binop_precedence:(char, int) Hashtbl.t = Hashtbl.create 10
+
+(* precedence - Get the precedence of the pending binary operator token. *)
+let precedence c = try Hashtbl.find binop_precedence c with Not_found -> -1
+
+...
+
+let main () =
+  (* Install standard binary operators.
+   * 1 is the lowest precedence. *)
+  Hashtbl.add Parser.binop_precedence '<' 10;
+  Hashtbl.add Parser.binop_precedence '+' 20;
+  Hashtbl.add Parser.binop_precedence '-' 20;
+  Hashtbl.add Parser.binop_precedence '*' 40;    (* highest. *)
+  ...
+```
+
+对于语言的基本形式，运算符优先级解析的基本思想是将具有潜在歧义的二进制运算符的表达式分解为多个部分
+
+```ocaml
+(* expression
+ *   ::= primary binoprhs *)
+and parse_expr = parser
+  | [< lhs=parse_primary; stream >] -> parse_bin_rhs 0 lhs stream
+```
+
+
