@@ -1,4 +1,11 @@
 
+<style>
+body {font-family: Georgia}
+h1 {font-family: Georgia;color:#f8dcac}
+p, h1, h2, h3, h4, h5, h6,code,li,ol {font-family: Times, TimesNR, 'New Century Schoolbook',
+     Georgia, 'New York', serif;}
+</style>
+
 # LLVM
 
 LLVM（Low Level Virtual Machine）是构架编译器(compiler)的框架系统，以C++编写而成，用于优化以任意程序语言编写的程序的编译时间(compile-time)、链接时间(link-time)、运行时间(run-time)以及空闲时间(idle-time)，对开发者保持开放，并兼容已有脚本。
@@ -45,6 +52,8 @@ LLVM可以使用SVN，Git完成版本控制，以及make，cmake等自动构建�
 
 ## 使用LLVM完成一个语言的前端
 
+<div align=center>
+
 ```dot
 digraph G {
     rankdir=LR;
@@ -54,6 +63,8 @@ digraph G {
     词法分析器 -> 语法分析器 -> 中间表示;   
 }
 ```
+
+</div>
 
 ### 词法分析器
 
@@ -144,7 +155,7 @@ and lex_number buffer = parser
       [< 'Token.Number (float_of_string (Buffer.contents buffer)); stream >]
 ```
 
-这是用于处理输入的非常简单的代码。从输入读取数值时，使用ocaml float_of_string 函数将其转换为存储在中的数值 Token.Number。请注意，这没有进行足够的错误检查：Failure如果字符串“ 1.23.45.67” ，它将引发错误。随意扩展它:)。接下来处理注释：
+这是用于处理输入的非常简单的代码。从输入读取数值时，使用ocaml float_of_string 函数将其转换为存储在中的数值 Token.Number。请注意，这没有进行足够的错误检查：Failure如果字符串“1.23.45.67” ，它将引发错误。随意扩展它:)。接下来处理注释：
 
 ```ocaml
   (* Comment until end of line. *)
@@ -288,7 +299,7 @@ parse_primary = parser
 
 #### 二进制表达式解析
 
-例如，当给定字符串“x + y * z”时，解析器可以选择将其解析为“(x + y) * z”或“ x + (y * z)”。使用数学上的通用定义，因为“*”（乘法）的优先级高于“+”（加法）的优先级。
+例如，当给定字符串“x + y * z”时，解析器可以选择将其解析为“(x + y) * z”或“x + (y * z)”。使用数学上的通用定义，因为“*”（乘法）的优先级高于“+”（加法）的优先级。
 
 有很多方法可以解决此问题，但是一种优雅而有效的方法是使用Operator-Precedence Parsing。此解析技术使用二进制运算符的优先级来指导递归。首先，需要一个优先级表：
 
@@ -437,7 +448,7 @@ let rec main_loop stream =
 
 #### 完整代码
 
-token.ml：
+`token.ml`
 
 ```ocaml
 (*===----------------------------------------------------------------------===
@@ -510,7 +521,7 @@ and lex_comment = parser
   | [< >] -> [< >]
 ```
 
-ast.ml：
+`ast.ml`
 
 ```ocaml
 (*===----------------------------------------------------------------------===
@@ -698,7 +709,7 @@ let rec main_loop stream =
       main_loop stream
 ```
 
-toy.ml：
+`toy.ml`
 
 ```ocaml
 (*===----------------------------------------------------------------------===
@@ -724,3 +735,110 @@ let main () =
 main ()
 ```
 
+### LLVM IR的代码生成
+
+为了生成LLVM IR开始一些简单的设置。首先，在每个AST类中定义虚拟代码生成（codegen）方法：
+
+```ocaml
+let rec codegen_expr = function
+  | Ast.Number n -> ...
+  | Ast.Variable name -> ...
+```
+
+该Codegen.codegen_expr函数说要为该AST节点发出IR及其依赖的所有事物，并且它们都返回LLVM Value对象。“值”是用于表示 LLVM中的“静态单一分配（SSA）寄存器”或“SSA值”的类。SSA值最明显的方面是，它们的值是在相关指令执行时计算的，并且直到（如果有）指令重新执行，它都不会获得新值。换句话说，没有办法“更改” SSA值。
+
+第二件事是像解析器一样使用的“错误”异常，该异常将用于报告在代码生成过程中发现的错误（例如，使用未声明的参数）：
+
+```ocaml
+exception Error of string
+
+let context = global_context ()
+let the_module = create_module context "my cool jit"
+let builder = builder context
+let named_values:(string, llvalue) Hashtbl.t = Hashtbl.create 10
+let double_type = double_type context
+```
+
+静态变量将在代码生成期间使用。 Codegen.the_module是LLVM构造，在一块代码中包含所有函数和全局变量。在许多方面，它是LLVM IR用来包含代码的顶层结构。
+
+Codegen.builder对象是一个帮助程序对象，可轻松生成LLVM指令。IRBuilder 类的实例 跟踪要插入指令的当前位置，并具有创建新指令的方法。
+
+Codegen.named_values映射跟踪当前范围中定义了哪些值，以及它们的LLVM表示形式是什么。（换句话说，它是代码的符号表）。唯一可以引用的是函数参数。这样，在为函数主体生成代码时，函数参数将位于此映射中。
+
+#### 表达式代码生成
+
+为表达式节点生成LLVM代码非常简单。对于数字表达式：
+
+```ocaml
+| Ast.Number n -> const_float double_type n
+```
+
+在LLVM IR中，数字常量由ConstantFP类表示，该类将数字值保存在APFloat 内部（APFloat具有保存任意精度的浮点常量的功能）。
+
+这段代码基本上只是创建并返回一个ConstantFP。请注意，在LLVM IR中，所有常量都唯一并共享。因此，API使用“foo :: get（..）”惯用语代替“new foo（..）”或“foo :: Create（..）”。
+
+```ocaml
+| Ast.Variable name ->
+    (try Hashtbl.find named_values name with
+      | Not_found -> raise (Error "unknown variable name"))
+```
+
+使用LLVM，对变量的引用也非常简单。在语言的简单版本中，假定变量已经在某个位置发出并且其值可用。实际上，Codegen.named_values映射中唯一可以包含的值是函数参数。此代码只是检查以查看指定的名称是否在映射中（如果不在映射中，则引用一个未知变量）并返回其值。还可以在符号表中添加对循环归纳变量和局部变量的支持。
+
+```ocaml
+| Ast.Binary (op, lhs, rhs) ->
+    let lhs_val = codegen_expr lhs in
+    let rhs_val = codegen_expr rhs in
+    begin
+      match op with
+      | '+' -> build_fadd lhs_val rhs_val "addtmp" builder
+      | '-' -> build_fsub lhs_val rhs_val "subtmp" builder
+      | '*' -> build_fmul lhs_val rhs_val "multmp" builder
+      | '<' ->
+          (* Convert bool 0/1 to double 0.0 or 1.0 *)
+          let i = build_fcmp Fcmp.Ult lhs_val rhs_val "cmptmp" builder in
+          build_uitofp i double_type "booltmp" builder
+      | _ -> raise (Error "invalid binary operator")
+    end
+```
+
+二元运算符解析的基本思想是递归地为表达式的左侧解析代码，然后再为右侧发出代码，然后计算二进制表达式的结果。在此代码中，对操作码进行了简单的切换以创建正确的LLVM指令。
+
+在上面的示例中，LLVM构建器类开始显示其值。IRBuilder知道在何处插入新创建的指令，所要做的就是指定要创建的指令（例如，使用 Llvm.create_add），要使用的操作数（lhs以及rhs此处），并可以选择为生成的指令提供名称。
+
+LLVM的一个好处是名称只是一个提示。例如，如果上面的代码发出多个“addtmp”变量，则LLVM将自动为每个变量提供一个递增的唯一数字后缀。指令的本地值名称纯粹是可选的，但是它使读取IR转储更加容易。
+
+LLVM指令受到严格的规则约束：例如，一条add指令的Left和Right运算符必须具有相同的类型，并且add的结果类型必须与操作数类型匹配。
+
+另一方面，LLVM指定fcmp指令始终返回“i1”值（一位整数）。问题在于语言希望该值为0.0或1.0。为了获得这些语义，将fcmp指令与uitofp指令结合在一起。该指令通过将输入视为无符号值，将其输入整数转换为浮点值。相反，如果使用sitofp指令，则语言'<'运算符将根据输入值返回0.0和-1.0。
+
+```ocaml
+| Ast.Call (callee, args) ->
+    (* Look up the name in the module table. *)
+    let callee =
+      match lookup_function callee the_module with
+      | Some callee -> callee
+      | None -> raise (Error "unknown function referenced")
+    in
+    let params = params callee in
+
+    (* If argument mismatch error. *)
+    if Array.length params == Array.length args then () else
+      raise (Error "incorrect # arguments passed");
+    let args = Array.map codegen_expr args in
+    build_call callee args "calltmp" builder
+```
+
+#### 函数代码生成
+
+原型和函数的代码生成必须处理许多细节，这使得它们的代码不如表达式代码生成漂亮.
+
+```ocaml
+let codegen_proto = function
+  | Ast.Prototype (name, args) ->
+      (* Make the function type: double(double,double) etc. *)
+      let doubles = Array.make (Array.length args) double_type in
+      let ft = function_type double_type doubles in
+      let f =
+        match lookup_function name the_module with
+```
