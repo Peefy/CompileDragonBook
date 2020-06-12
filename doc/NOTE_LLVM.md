@@ -5,10 +5,722 @@ LLVM（Low Level Virtual Machine）是构架编译器(compiler)的框架系统�
 
 LLVM的主要作用是它可以作为多种语言的后端，它可以提供可编程语言无关的优化和针对很多种CPU的代码生成功能。此外llvm目前已经不仅仅是个编程框架，它目前还包含了很多的子项目，比如最具盛名的clang.
 
-LLVM项目包含多个组件。该项目的核心本身称为“ LLVM”。它包含处理中间表示并将其转换为目标文件所需的所有工具，库和头文件。工具包括汇编程序，反汇编程序，位代码分析器和位代码优化器。它还包含基本的回归测试。
+LLVM项目包含多个组件。该项目的核心本身称为“LLVM”。它包含处理中间表示并将其转换为目标文件所需的所有工具，库和头文件。工具包括汇编程序，反汇编程序，位代码分析器和位代码优化器。它还包含基本的回归测试。
 
 类似C的语言使用Clang前端。该组件将C，C ++，Objective C和Objective C ++代码编译为LLVM位代码，并使用LLVM从那里编译为目标文件。
 
 ## LLVM 入门
 
+* **SRC_ROOT**-这是LLVM源树的顶级目录。
+* **OBJ_ROOT**-这是LLVM对象树的顶层目录（即，将放置目标文件和编译的程序的树。它可以与SRC_ROOT相同）。
+
+LLVM可以使用SVN，Git完成版本控制，以及make，cmake等自动构建。
+
+### LLVM 目录布局
+
+* `llvm/examples`-使用LLVM IR和JIT的简单示例。
+* `llvm/include`-从LLVM库导出的公共头文件。三个主要子目录：
+
+1. llvm/include/llvm 所有特定LLVM的头文件和子目录LLVM的不同部分：Analysis，CodeGen，Target，Transforms，等...
+2. llvm/include/llvm/Support LLVM附带的通用支持库，但不一定特定于LLVM。例如，某些C ++ STL实用程序和命令行选项处理库在此处存储头文件。
+3. llvm/include/llvm/Config 由配置的头文件cmake。它们包装“标准” UNIX和C头文件。源代码可以包括这些头文件，这些头文件会自动处理cmake 生成的条件#include 。
+   
+* `llvm/lib`-大多数源文件在这里。通过将代码放入库中，LLVM使得在工具之间共享代码变得容易。
+
+1. llvm/lib/IR/ 实现诸如Instruction和BasicBlock之类的核心类的核心LLVM源文件。
+2. llvm/lib/AsmParser/ LLVM汇编语言解析器库的源代码。
+3. llvm/lib/Bitcode/ 用于读取和写入位码的代码。
+4. llvm/lib/Analysis/ 各种程序分析，例如调用图，归纳变量，自然循环标识等。
+5. llvm/lib/Transforms/ IR到IR程序的转换，例如积极的死代码消除，稀疏的条件常数传播，内联，循环不变代码运动，死全局消除等。
+6. llvm/lib/Target/ 描述用于代码生成的目标体系结构的文件。例如， llvm/lib/Target/X86保存X86机器描述。
+7. llvm/lib/CodeGen/ 代码生成器的主要部分：指令选择器，指令调度和寄存器分配。
+8. llvm/lib/MC/ （FIXME：待定）....？
+9. llvm/lib/ExecutionEngine/ 在解释的和JIT编译的场景中，用于在运行时直接执行位代码的库。
+10. llvm/lib/Support/ 源代码，对应于头文件中llvm/include/ADT/ 和llvm/include/Support/。
+* `llvm/projects`-项目并非严格属于LLVM，而是与LLVM一起提供。这也是用于创建自己的基于LLVM的项目的目录，该项目利用LLVM构建系统。
+* `llvm/test`-LLVM基础架构上的功能和回归测试以及其他完整性检查。它们旨在快速运行并覆盖很多领域，而并非详尽无遗。
+* `test-suite`-LLVM的全面正确性，性能和基准测试套件。这是一个，因为它在各种许可下都包含大量的第三方代码。
+* `llvm/tools`-在上述库的基础上构建的可执行文件，它们构成用户界面的主要部分。始终可以通过键入来获得有关工具的帮助。
+* `llvm/utils`-用于处理LLVM源代码的实用程序；有些是构建过程的一部分，因为它们是基础结构各部分的代码生成器。
+
+## 使用LLVM完成一个语言的前端
+
+```dot
+digraph G {
+    rankdir=LR;
+    词法分析器 [shape=box];
+    语法分析器 [shape=box];
+    中间表示 [shape=box];
+    词法分析器 -> 语法分析器 -> 中间表示;   
+}
+```
+
+### 词法分析器
+
+比如对于简单的BASIC语言：
+
+```basic
+# Compute the x'th fibonacci number.
+def fib(x)
+  if x < 3 then
+    1
+  else
+    fib(x-1)+fib(x-2)
+
+# This expression will compute the 40th number.
+fib(40)
+```
+
+在实现语言方面，首先需要的是处理文本文件并识别其内容的能力。传统方法是使用“词法分析器”（又称“扫描器”）将输入分解为“token”。词法分析器返回的每个记号都包含记号代码和潜在的一些元数据（例如数字的数值）。
+
+```ocaml
+(* The lexer returns these 'Kwd' if it is an unknown character, otherwise one of
+ * these others for known things. *)
+type token =
+  (* commands *)
+  | Def | Extern
+
+  (* primary *)
+  | Ident of string | Number of float
+
+  (* unknown *)
+  | Kwd of char
+```
+
+词法分析器返回的每个词法符号都是词法变量值之一。诸如'+'之类的未知字符将作为返回 。如果当前记号是标识符，则值为字符串。如果当前标记是数字文字（如1.0），则值为Token.Kwd '+' Token.Ident sToken.Number 1.0
+
+词法分析器的实际实现是由名为的函数驱动的函数的集合Lexer.lex。Lexer.lex调用该函数以从标准输入返回下一个标记
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Lexer
+ *===----------------------------------------------------------------------===*)
+
+let rec lex = parser
+  (* Skip any whitespace. *)
+  | [< ' (' ' | '\n' | '\r' | '\t'); stream >] -> lex stream
+```
+
+Lexer.lex通过递归从标准输入读取字符来工作。它会在识别出它们后存储在一个变量中。它要做的第一件事是忽略词法符号之间的空格。这是通过上面的`char Stream.tToken.token`递归调用完成的。
+
+接下来Lexer.lex要做的是识别标识符和特定的关键字，例如“def”
+
+```ocaml
+  (* identifier: [a-zA-Z][a-zA-Z0-9] *)
+  | [< ' ('A' .. 'Z' | 'a' .. 'z' as c); stream >] ->
+      let buffer = Buffer.create 1 in
+      Buffer.add_char buffer c;
+      lex_ident buffer stream
+
+...
+
+and lex_ident buffer = parser
+  | [< ' ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' as c); stream >] ->
+      Buffer.add_char buffer c;
+      lex_ident buffer stream
+  | [< stream=lex >] ->
+      match Buffer.contents buffer with
+      | "def" -> [< 'Token.Def; stream >]
+      | "extern" -> [< 'Token.Extern; stream >]
+      | id -> [< 'Token.Ident id; stream >]
+```
+
+识别数字:
+
+```ocaml
+  (* number: [0-9.]+ *)
+  | [< ' ('0' .. '9' as c); stream >] ->
+      let buffer = Buffer.create 1 in
+      Buffer.add_char buffer c;
+      lex_number buffer stream
+
+...
+
+and lex_number buffer = parser
+  | [< ' ('0' .. '9' | '.' as c); stream >] ->
+      Buffer.add_char buffer c;
+      lex_number buffer stream
+  | [< stream=lex >] ->
+      [< 'Token.Number (float_of_string (Buffer.contents buffer)); stream >]
+```
+
+这是用于处理输入的非常简单的代码。从输入读取数值时，使用ocaml float_of_string 函数将其转换为存储在中的数值 Token.Number。请注意，这没有进行足够的错误检查：Failure如果字符串“ 1.23.45.67” ，它将引发错误。随意扩展它:)。接下来处理注释：
+
+```ocaml
+  (* Comment until end of line. *)
+  | [< ' ('#'); stream >] ->
+      lex_comment stream
+
+...
+
+and lex_comment = parser
+  | [< ' ('\n'); stream=lex >] -> stream
+  | [< 'c; e=lex_comment >] -> e
+  | [< >] -> [< >]
+```
+
+通过跳到行尾来处理注释，然后返回下一个标记。最后，如果输入与以上情况之一不匹配，则该输入可能是运算符，例如“+”，或者是文件结尾。这些使用以下代码处理：
+
+```ocaml
+(* Otherwise, just return the character as its ascii value. *)
+| [< 'c; stream >] ->
+    [< 'Token.Kwd c; lex stream >]
+
+(* end of stream. *)
+| [< >] -> [< >]
+```
+
+### 语法解析器
+
+#### 抽象语法树AST
+
+构建的解析器使用**递归下降解析**和**运算符优先解析**的组合来解析语言（后者用于二进制表达式，前者用于其他所有内容）。解析器的输出是**抽象语法树AST**。
+
+程序的AST捕获其行为的方式使得编译器的后续阶段（例如代码生成）易于解释。基本上希望为该语言的每个构造提供一个对象，而AST应该紧密地对该语言建模。在语言中，有表达式，原型和函数对象。将从表达式开始：
+
+```ocaml
+(* expr - Base type for all expression nodes. *)
+type expr =
+  (* variant for numeric literals like "1.0". *)
+  | Number of float
+```
+
+上面的代码显示了ExprAST基类的定义和一个用于数字文字的子类的定义。
+
+以语言的基本形式使用的其他表达AST节点定义：
+
+```ocaml
+(* variant for referencing a variable, like "a". *)
+| Variable of string
+
+(* variant for a binary operator. *)
+| Binary of char * expr * expr
+
+(* variant for function calls. *)
+| Call of string * expr array
+```
+
+`Variable`变量捕获变量名，`Binary`二进制运算符捕获其操作码（例如'+'），`Call`调用捕获函数名以及任何参数表达式的列表。
+
+对于基本语言，这些都是我定义的所有表达节点。因为它没有条件控制流，所以它不是图灵完备的。
+
+```ocaml
+(* proto - This type represents the "prototype" for a function, which captures
+ * its name, and its argument names (thus implicitly the number of arguments the
+ * function takes). *)
+type proto = Prototype of string * string array
+
+(* func - This type represents a function definition itself. *)
+type func = Function of proto * expr
+```
+
+函数仅以其参数数量来输入。由于所有值都是双精度浮点数，因此每个参数的类型都不需要存储在任何地方。用一种更具攻击性和现实性的语言，“expr”变体可能会有一个类型字段。
+
+#### 分析器基础
+
+需要定义解析器代码来构建AST。比如想要将类似“x + y”（由词法分析器作为三个标记返回）的内容解析为可以通过如下调用生成的AST：
+
+```ocaml
+let x = Variable "x" in
+let y = Variable "y" in
+let result = Binary ('+', x, y) in
+...
+```
+
+错误处理例程利用了内置函数，当解析器无法在模式的第一个位置中找到任何匹配的记号时，将引发错误处理例程Stream.Failure。 当第一个记号匹配时引发，其余的不匹配。
+
+#### 基本的表达式分析
+
+对于语法中的每个产生式，将定义一个解析该产生式的函数，并将此类表达式称为“主要”表达式。比如，对于数字表达式：
+
+```ocaml
+(* primary
+ *   ::= identifier
+ *   ::= numberexpr
+ *   ::= parenexpr *)
+parse_primary = parser
+  (* numberexpr ::= number *)
+  | [< 'Token.Number n >] -> Ast.Number n
+```
+
+以上例程期望在当前记号是`Token.Number`记号时被调用。它采用当前数字值，创建一个`Ast.Number`节点，将词法分析器移至下一个标记，最后返回。
+
+括号运算符的定义如下：
+
+```ocaml
+(* parenexpr ::= '(' expression ')' *)
+| [< 'Token.Kwd '('; e=parse_expr; 'Token.Kwd ')' ?? "expected ')'" >] -> e
+```
+
+下一个简单的生产式是用于处理变量引用和函数调用：
+
+```ocaml
+(* identifierexpr
+ *   ::= identifier
+ *   ::= identifier '(' argumentexpr ')' *)
+| [< 'Token.Ident id; stream >] ->
+    let rec parse_args accumulator = parser
+      | [< e=parse_expr; stream >] ->
+          begin parser
+            | [< 'Token.Kwd ','; e=parse_args (e :: accumulator) >] -> e
+            | [< >] -> e :: accumulator
+          end stream
+      | [< >] -> accumulator
+    in
+    let rec parse_ident id = parser
+      (* Call. *)
+      | [< 'Token.Kwd '(';
+           args=parse_args [];
+           'Token.Kwd ')' ?? "expected ')'">] ->
+          Ast.Call (id, Array.of_list (List.rev args))
+
+      (* Simple variable ref. *)
+      | [< >] -> Ast.Variable id
+    in
+    parse_ident id stream
+```
+
+如果接收到了没想到的记号，则会引发异常：
+
+```ocaml
+| [< >] -> raise (Stream.Error "unknown token when expecting an expression.")
+```
+
+#### 二进制表达式解析
+
+例如，当给定字符串“x + y * z”时，解析器可以选择将其解析为“(x + y) * z”或“ x + (y * z)”。使用数学上的通用定义，因为“*”（乘法）的优先级高于“+”（加法）的优先级。
+
+有很多方法可以解决此问题，但是一种优雅而有效的方法是使用Operator-Precedence Parsing。此解析技术使用二进制运算符的优先级来指导递归。首先，需要一个优先级表：
+
+```ocaml
+(* binop_precedence - This holds the precedence for each binary operator that is
+ * defined *)
+let binop_precedence:(char, int) Hashtbl.t = Hashtbl.create 10
+
+(* precedence - Get the precedence of the pending binary operator token. *)
+let precedence c = try Hashtbl.find binop_precedence c with Not_found -> -1
+
+...
+
+let main () =
+  (* Install standard binary operators.
+   * 1 is the lowest precedence. *)
+  Hashtbl.add Parser.binop_precedence '<' 10;
+  Hashtbl.add Parser.binop_precedence '+' 20;
+  Hashtbl.add Parser.binop_precedence '-' 20;
+  Hashtbl.add Parser.binop_precedence '*' 40;    (* highest. *)
+  ...
+```
+
+对于语言的基本形式，运算符优先级解析的基本思想是将具有潜在歧义的二进制运算符的表达式分解为多个部分
+
+```ocaml
+(* expression
+ *   ::= primary binoprhs *)
+and parse_expr = parser
+  | [< lhs=parse_primary; stream >] -> parse_bin_rhs 0 lhs stream
+```
+
+```ocaml
+(* binoprhs
+ *   ::= ('+' primary)* *)
+and parse_bin_rhs expr_prec lhs stream =
+  match Stream.peek stream with
+  (* If this is a binop, find its precedence. *)
+  | Some (Token.Kwd c) when Hashtbl.mem binop_precedence c ->
+      let token_prec = precedence c in
+
+      (* If this is a binop that binds at least as tightly as the current binop,
+       * consume it, otherwise we are done. *)
+      if token_prec < expr_prec then lhs else begin
+```
+
+此代码获取当前记号的优先级，并检查是否太低。因为将无效记号定义为优先级为-1，所以此检查隐式知道当记号流用尽二进制运算符时，对流结束。如果此检查成功，知道记号是二进制运算符，它将包含在此表达式中：
+
+```ocaml
+(* Eat the binop. *)
+Stream.junk stream;
+
+(* Parse the primary expression after the binary operator *)
+let rhs = parse_primary stream in
+
+(* Okay, we know this is a binop. *)
+let rhs =
+  match Stream.peek stream with
+  | Some (Token.Kwd c2) ->
+```
+
+#### 解析函数原型
+
+```ocaml
+(* prototype
+ *   ::= id '(' id* ')' *)
+let parse_prototype =
+  let rec parse_args accumulator = parser
+    | [< 'Token.Ident id; e=parse_args (id::accumulator) >] -> e
+    | [< >] -> accumulator
+  in
+
+  parser
+  | [< 'Token.Ident id;
+       'Token.Kwd '(' ?? "expected '(' in prototype";
+       args=parse_args [];
+       'Token.Kwd ')' ?? "expected ')' in prototype" >] ->
+      (* success. *)
+      Ast.Prototype (id, Array.of_list (List.rev args))
+
+  | [< >] ->
+      raise (Stream.Error "expected function name in prototype")
+```
+
+```ocaml
+(* definition ::= 'def' prototype expression *)
+let parse_definition = parser
+  | [< 'Token.Def; p=parse_prototype; e=parse_expr >] ->
+      Ast.Function (p, e)
+```
+
+另外，支持'extern'来声明诸如'sin'和'cos'之类的函数，并支持用户函数的正向声明。这些“外部”只是没有主体的原型：
+
+```ocaml
+(*  external ::= 'extern' prototype *)
+let parse_extern = parser
+  | [< 'Token.Extern; e=parse_prototype >] -> e
+```
+
+最后，还将让用户键入任意顶级表达式，并即时对其求值。将通过为它们定义匿名空值（零参数）函数来处理此问题：
+
+```ocaml
+(* toplevelexpr ::= expression *)
+let parse_toplevel = parser
+  | [< e=parse_expr >] ->
+      (* Make an anonymous proto. *)
+      Ast.Function (Ast.Prototype ("", [||]), e)
+```
+
+#### 解析器驱动程序
+
+该驱动程序仅通过顶级调度循环调用所有解析块。
+
+```ocaml
+(* top ::= definition | external | expression | ';' *)
+let rec main_loop stream =
+  match Stream.peek stream with
+  | None -> ()
+
+  (* ignore top-level semicolons. *)
+  | Some (Token.Kwd ';') ->
+      Stream.junk stream;
+      main_loop stream
+
+  | Some token ->
+      begin
+        try match token with
+        | Token.Def ->
+            ignore(Parser.parse_definition stream);
+            print_endline "parsed a function definition.";
+        | Token.Extern ->
+            ignore(Parser.parse_extern stream);
+            print_endline "parsed an extern.";
+        | _ ->
+            (* Evaluate a top-level expression into an anonymous function. *)
+            ignore(Parser.parse_toplevel stream);
+            print_endline "parsed a top-level expr";
+        with Stream.Error s ->
+          (* Skip token for error recovery. *)
+          Stream.junk stream;
+          print_endline s;
+      end;
+      print_string "ready> "; flush stdout;
+      main_loop stream
+```
+
+#### 完整代码
+
+token.ml：
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Lexer Tokens
+ *===----------------------------------------------------------------------===*)
+
+(* The lexer returns these 'Kwd' if it is an unknown character, otherwise one of
+ * these others for known things. *)
+type token =
+  (* commands *)
+  | Def | Extern
+
+  (* primary *)
+  | Ident of string | Number of float
+
+  (* unknown *)
+  | Kwd of char
+lexer.ml：
+(*===----------------------------------------------------------------------===
+ * Lexer
+ *===----------------------------------------------------------------------===*)
+
+let rec lex = parser
+  (* Skip any whitespace. *)
+  | [< ' (' ' | '\n' | '\r' | '\t'); stream >] -> lex stream
+
+  (* identifier: [a-zA-Z][a-zA-Z0-9] *)
+  | [< ' ('A' .. 'Z' | 'a' .. 'z' as c); stream >] ->
+      let buffer = Buffer.create 1 in
+      Buffer.add_char buffer c;
+      lex_ident buffer stream
+
+  (* number: [0-9.]+ *)
+  | [< ' ('0' .. '9' as c); stream >] ->
+      let buffer = Buffer.create 1 in
+      Buffer.add_char buffer c;
+      lex_number buffer stream
+
+  (* Comment until end of line. *)
+  | [< ' ('#'); stream >] ->
+      lex_comment stream
+
+  (* Otherwise, just return the character as its ascii value. *)
+  | [< 'c; stream >] ->
+      [< 'Token.Kwd c; lex stream >]
+
+  (* end of stream. *)
+  | [< >] -> [< >]
+
+and lex_number buffer = parser
+  | [< ' ('0' .. '9' | '.' as c); stream >] ->
+      Buffer.add_char buffer c;
+      lex_number buffer stream
+  | [< stream=lex >] ->
+      [< 'Token.Number (float_of_string (Buffer.contents buffer)); stream >]
+
+and lex_ident buffer = parser
+  | [< ' ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' as c); stream >] ->
+      Buffer.add_char buffer c;
+      lex_ident buffer stream
+  | [< stream=lex >] ->
+      match Buffer.contents buffer with
+      | "def" -> [< 'Token.Def; stream >]
+      | "extern" -> [< 'Token.Extern; stream >]
+      | id -> [< 'Token.Ident id; stream >]
+
+and lex_comment = parser
+  | [< ' ('\n'); stream=lex >] -> stream
+  | [< 'c; e=lex_comment >] -> e
+  | [< >] -> [< >]
+```
+
+ast.ml：
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Abstract Syntax Tree (aka Parse Tree)
+ *===----------------------------------------------------------------------===*)
+
+(* expr - Base type for all expression nodes. *)
+type expr =
+  (* variant for numeric literals like "1.0". *)
+  | Number of float
+
+  (* variant for referencing a variable, like "a". *)
+  | Variable of string
+
+  (* variant for a binary operator. *)
+  | Binary of char * expr * expr
+
+  (* variant for function calls. *)
+  | Call of string * expr array
+
+(* proto - This type represents the "prototype" for a function, which captures
+ * its name, and its argument names (thus implicitly the number of arguments the
+ * function takes). *)
+type proto = Prototype of string * string array
+
+(* func - This type represents a function definition itself. *)
+type func = Function of proto * expr
+parser.ml：
+(*===---------------------------------------------------------------------===
+ * Parser
+ *===---------------------------------------------------------------------===*)
+
+(* binop_precedence - This holds the precedence for each binary operator that is
+ * defined *)
+let binop_precedence:(char, int) Hashtbl.t = Hashtbl.create 10
+
+(* precedence - Get the precedence of the pending binary operator token. *)
+let precedence c = try Hashtbl.find binop_precedence c with Not_found -> -1
+
+(* primary
+ *   ::= identifier
+ *   ::= numberexpr
+ *   ::= parenexpr *)
+let rec parse_primary = parser
+  (* numberexpr ::= number *)
+  | [< 'Token.Number n >] -> Ast.Number n
+
+  (* parenexpr ::= '(' expression ')' *)
+  | [< 'Token.Kwd '('; e=parse_expr; 'Token.Kwd ')' ?? "expected ')'" >] -> e
+
+  (* identifierexpr
+   *   ::= identifier
+   *   ::= identifier '(' argumentexpr ')' *)
+  | [< 'Token.Ident id; stream >] ->
+      let rec parse_args accumulator = parser
+        | [< e=parse_expr; stream >] ->
+            begin parser
+              | [< 'Token.Kwd ','; e=parse_args (e :: accumulator) >] -> e
+              | [< >] -> e :: accumulator
+            end stream
+        | [< >] -> accumulator
+      in
+      let rec parse_ident id = parser
+        (* Call. *)
+        | [< 'Token.Kwd '(';
+             args=parse_args [];
+             'Token.Kwd ')' ?? "expected ')'">] ->
+            Ast.Call (id, Array.of_list (List.rev args))
+
+        (* Simple variable ref. *)
+        | [< >] -> Ast.Variable id
+      in
+      parse_ident id stream
+
+  | [< >] -> raise (Stream.Error "unknown token when expecting an expression.")
+
+(* binoprhs
+ *   ::= ('+' primary)* *)
+and parse_bin_rhs expr_prec lhs stream =
+  match Stream.peek stream with
+  (* If this is a binop, find its precedence. *)
+  | Some (Token.Kwd c) when Hashtbl.mem binop_precedence c ->
+      let token_prec = precedence c in
+
+      (* If this is a binop that binds at least as tightly as the current binop,
+       * consume it, otherwise we are done. *)
+      if token_prec < expr_prec then lhs else begin
+        (* Eat the binop. *)
+        Stream.junk stream;
+
+        (* Parse the primary expression after the binary operator. *)
+        let rhs = parse_primary stream in
+
+        (* Okay, we know this is a binop. *)
+        let rhs =
+          match Stream.peek stream with
+          | Some (Token.Kwd c2) ->
+              (* If BinOp binds less tightly with rhs than the operator after
+               * rhs, let the pending operator take rhs as its lhs. *)
+              let next_prec = precedence c2 in
+              if token_prec < next_prec
+              then parse_bin_rhs (token_prec + 1) rhs stream
+              else rhs
+          | _ -> rhs
+        in
+
+        (* Merge lhs/rhs. *)
+        let lhs = Ast.Binary (c, lhs, rhs) in
+        parse_bin_rhs expr_prec lhs stream
+      end
+  | _ -> lhs
+
+(* expression
+ *   ::= primary binoprhs *)
+and parse_expr = parser
+  | [< lhs=parse_primary; stream >] -> parse_bin_rhs 0 lhs stream
+
+(* prototype
+ *   ::= id '(' id* ')' *)
+let parse_prototype =
+  let rec parse_args accumulator = parser
+    | [< 'Token.Ident id; e=parse_args (id::accumulator) >] -> e
+    | [< >] -> accumulator
+  in
+
+  parser
+  | [< 'Token.Ident id;
+       'Token.Kwd '(' ?? "expected '(' in prototype";
+       args=parse_args [];
+       'Token.Kwd ')' ?? "expected ')' in prototype" >] ->
+      (* success. *)
+      Ast.Prototype (id, Array.of_list (List.rev args))
+
+  | [< >] ->
+      raise (Stream.Error "expected function name in prototype")
+
+(* definition ::= 'def' prototype expression *)
+let parse_definition = parser
+  | [< 'Token.Def; p=parse_prototype; e=parse_expr >] ->
+      Ast.Function (p, e)
+
+(* toplevelexpr ::= expression *)
+let parse_toplevel = parser
+  | [< e=parse_expr >] ->
+      (* Make an anonymous proto. *)
+      Ast.Function (Ast.Prototype ("", [||]), e)
+
+(*  external ::= 'extern' prototype *)
+let parse_extern = parser
+  | [< 'Token.Extern; e=parse_prototype >] -> e
+toplevel.ml：
+(*===----------------------------------------------------------------------===
+ * Top-Level parsing and JIT Driver
+ *===----------------------------------------------------------------------===*)
+
+(* top ::= definition | external | expression | ';' *)
+let rec main_loop stream =
+  match Stream.peek stream with
+  | None -> ()
+
+  (* ignore top-level semicolons. *)
+  | Some (Token.Kwd ';') ->
+      Stream.junk stream;
+      main_loop stream
+
+  | Some token ->
+      begin
+        try match token with
+        | Token.Def ->
+            ignore(Parser.parse_definition stream);
+            print_endline "parsed a function definition.";
+        | Token.Extern ->
+            ignore(Parser.parse_extern stream);
+            print_endline "parsed an extern.";
+        | _ ->
+            (* Evaluate a top-level expression into an anonymous function. *)
+            ignore(Parser.parse_toplevel stream);
+            print_endline "parsed a top-level expr";
+        with Stream.Error s ->
+          (* Skip token for error recovery. *)
+          Stream.junk stream;
+          print_endline s;
+      end;
+      print_string "ready> "; flush stdout;
+      main_loop stream
+```
+
+toy.ml：
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Main driver code.
+ *===----------------------------------------------------------------------===*)
+
+let main () =
+  (* Install standard binary operators.
+   * 1 is the lowest precedence. *)
+  Hashtbl.add Parser.binop_precedence '<' 10;
+  Hashtbl.add Parser.binop_precedence '+' 20;
+  Hashtbl.add Parser.binop_precedence '-' 20;
+  Hashtbl.add Parser.binop_precedence '*' 40;    (* highest. *)
+
+  (* Prime the first token. *)
+  print_string "ready> "; flush stdout;
+  let stream = Lexer.lex (Stream.of_channel stdin) in
+
+  (* Run the main "interpreter loop" now. *)
+  Toplevel.main_loop stream;
+;;
+
+main ()
+```
 
