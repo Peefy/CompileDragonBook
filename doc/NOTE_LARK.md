@@ -1,7 +1,7 @@
 
 # Lark-Parser
 
-用于Python的现代解析库，实现Earley和LALR( 1)和简单的接口
+用于Python的现代解析库，实现Earley和LALR(1)和简单的接口
 
 Lark-Parser的特点：
 
