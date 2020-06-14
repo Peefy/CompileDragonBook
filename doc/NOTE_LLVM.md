@@ -842,3 +842,99 @@ let codegen_proto = function
       let f =
         match lookup_function name the_module with
 ```
+
+此代码将大量功能打包成几行。首先请注意，此函数返回“ Function *”而不是“ Value *”（尽管目前它们都llvalue在ocaml 中建模）。因为“原型”实际上是在谈论函数的外部接口（而不是表达式计算的值），所以有意义的是，它返回代码生成时对应的LLVM函数。
+
+调用Llvm.function_typecreate Llvm.llvalue应该用于给定的原型。由于万花筒中的所有函数参数均为double类型，因此第一行将创建一个“ N”个LLVM double类型的向量。然后，它使用该Llvm.function_type方法来创建一个函数类型，该函数类型以“ N”个double作为参数，并返回一个double作为结果，而不是vararg（使用function Llvm.var_arg_function_type）。请注意，LLVM中的类型就像的一样是唯一Constant的，因此您不必“新建”一个类型，而是“获取”它。
+
+上面的最后一行检查函数是否已在中定义 Codegen.the_module。如果没有，我们将创建它。
+
+```ocaml
+| None -> declare_function name ft the_module
+```
+
+这表明要使用的类型和名称，以及要插入的模块。默认情况下，我们假设一个函数具有 Llvm.Linkage.ExternalLinkage。“ 外部链接 ”是指该功能可以在当前模块外部定义和/或可以由模块外部的函数调用。name传入的“ ”是用户指定的名称：此名称已注册在“ Codegen.the_module”符号表中，上面的函数调用代码使用该符号表。
+
+在万花筒中，我选择在两种情况下允许对函数进行重新定义：首先，我们希望允许多次对函数进行“外部”赋值，只要外部函数的原型匹配（由于所有参数都具有相同的类型，我们只是必须检查参数数量是否匹配）。其次，我们要允许“外部化”一个函数，然后为其定义一个主体。在定义相互递归函数时，这很有用。
+
+```ocaml
+  (* If 'f' conflicted, there was already something named 'name'. If it
+   * has a body, don't allow redefinition or reextern. *)
+  | Some f ->
+      (* If 'f' already has a body, reject this. *)
+      if Array.length (basic_blocks f) == 0 then () else
+        raise (Error "redefinition of function");
+
+      (* If 'f' took a different number of arguments, reject. *)
+      if Array.length (params f) == Array.length args then () else
+        raise (Error "redefinition of function with different # args");
+      f
+in
+```
+
+为了验证上述逻辑，我们首先检查现有功能是否为“空”。在这种情况下，empty表示其中没有基本块，这意味着它没有主体。如果没有主体，则为前向声明。由于在函数的完整定义后我们不允许任何操作，因此代码拒绝这种情况。如果先前对函数的引用是“外部”，我们只需验证该定义的自变量数量与该定义是否匹配即可。如果没有，我们将发出错误消息。
+
+```ocaml
+(* Set names for all arguments. *)
+Array.iteri (fun i a ->
+  let n = args.(i) in
+  set_value_name n a;
+  Hashtbl.add named_values n a;
+) (params f);
+f
+```
+
+原型的最后一部分代码遍历了函数中的所有参数，将LLVM Argument对象的名称设置为匹配，并在Codegen.named_values映射中注册了参数以供Ast.Variable变体将来使用。设置完成后，它将Function对象返回给调用方。请注意，此处我们不检查是否存在冲突的参数名称（例如“ extern foo（aba）”）。这样做对于我们上面已经使用的机制非常简单。
+
+```ocaml
+let codegen_func = function
+  | Ast.Function (proto, body) ->
+      Hashtbl.clear named_values;
+      let the_function = codegen_proto proto in
+```
+
+函数定义的代码生成开始就非常简单：我们只需对原型（Proto）进行代码生成，并验证它是可以的。然后，我们清除Codegen.named_values地图以确保上次编译的函数中没有任何内容。原型的代码生成可确保有一个可供我们使用的LLVM Function对象。
+
+```ocaml
+(* Create a new basic block to start insertion into. *)
+let bb = append_block context "entry" the_function in
+position_at_end bb builder;
+
+try
+  let ret_val = codegen_expr body in
+```
+
+现在，我们开始进行Codegen.builder设置。第一行创建一个新的基本块（名为“ entry”），将其插入the_function。然后第二行告诉构建者，新指令应插入到新基本块的末尾。LLVM中的基本块是定义控制流图的功能的重要组成部分。由于我们没有任何控制流，因此我们的函数此时仅包含一个块。我们将在第5章中解决此问题：)。
+
+```ocaml
+let ret_val = codegen_expr body in
+
+(* Finish off the function. *)
+let _ = build_ret ret_val builder in
+
+(* Validate the generated code, checking for consistency. *)
+Llvm_analysis.assert_valid_function the_function;
+
+the_function
+```
+
+设置插入点后，我们Codegen.codegen_func 将为函数的根表达式调用方法。如果没有错误发生，它将发出代码以将表达式计算到输入块中，并返回计算出的值。假设没有错误，我们然后创建LLVM ret指令，以完成该功能。构建函数后，我们将调用 Llvm_analysis.assert_valid_functionLLVM提供的。该函数对生成的代码进行各种一致性检查，以确定我们的编译器是否在正确执行所有操作。使用它很重要：它可以捕获很多错误。函数完成并验证后，我们将其返回。
+
+```ocaml
+with e ->
+  delete_function the_function;
+  raise e
+```
+
+这里剩下的唯一内容是错误情况的处理。为简单起见，我们仅通过删除使用该Llvm.delete_function方法生成的函数来处理此问题 。这使用户可以重新定义以前错误输入的函数：如果我们不删除它，该函数将与主体一起存在于符号表中，以防止将来重新定义。
+
+这段代码确实有一个错误。由于Codegen.codegen_proto 可以返回先前定义的前向声明，因此我们的代码实际上可以删除前向声明。有多种方法可以修复此错误，请看您能想到些什么！这是一个测试用例：
+
+```ocaml
+extern foo(a b);     # ok, defines foo.
+def foo(a b) c;      # error, 'c' is invalid.
+def bar() foo(1, 2); # error, unknown function "foo"
+```
+
+#### 驱动程序
+
