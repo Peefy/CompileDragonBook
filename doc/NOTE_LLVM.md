@@ -845,17 +845,17 @@ let codegen_proto = function
 
 此代码将大量功能打包成几行。首先请注意，此函数返回“ Function *”而不是“ Value *”（尽管目前它们都llvalue在ocaml 中建模）。因为“原型”实际上是在谈论函数的外部接口（而不是表达式计算的值），所以有意义的是，它返回代码生成时对应的LLVM函数。
 
-调用Llvm.function_typecreate Llvm.llvalue应该用于给定的原型。由于万花筒中的所有函数参数均为double类型，因此第一行将创建一个“ N”个LLVM double类型的向量。然后，它使用该Llvm.function_type方法来创建一个函数类型，该函数类型以“ N”个double作为参数，并返回一个double作为结果，而不是vararg（使用function Llvm.var_arg_function_type）。请注意，LLVM中的类型就像的一样是唯一Constant的，因此您不必“新建”一个类型，而是“获取”它。
+调用Llvm.function_typecreate Llvm.llvalue应该用于给定的原型。由于万花筒中的所有函数参数均为double类型，因此第一行将创建一个“ N”个LLVM double类型的向量。然后，它使用该Llvm.function_type方法来创建一个函数类型，该函数类型以“ N”个double作为参数，并返回一个double作为结果，而不是vararg（使用function Llvm.var_arg_function_type）。请注意，LLVM中的类型就像的一样是唯一Constant的，因此不必“新建”一个类型，而是“获取”它。
 
-上面的最后一行检查函数是否已在中定义 Codegen.the_module。如果没有，我们将创建它。
+上面的最后一行检查函数是否已在中定义 Codegen.the_module。如果没有，将创建它。
 
 ```ocaml
 | None -> declare_function name ft the_module
 ```
 
-这表明要使用的类型和名称，以及要插入的模块。默认情况下，我们假设一个函数具有 Llvm.Linkage.ExternalLinkage。“ 外部链接 ”是指该功能可以在当前模块外部定义和/或可以由模块外部的函数调用。name传入的“ ”是用户指定的名称：此名称已注册在“ Codegen.the_module”符号表中，上面的函数调用代码使用该符号表。
+这表明要使用的类型和名称，以及要插入的模块。默认情况下，假设一个函数具有 Llvm.Linkage.ExternalLinkage。“ 外部链接 ”是指该功能可以在当前模块外部定义和/或可以由模块外部的函数调用。name传入的“ ”是用户指定的名称：此名称已注册在“ Codegen.the_module”符号表中，上面的函数调用代码使用该符号表。
 
-在万花筒中，我选择在两种情况下允许对函数进行重新定义：首先，我们希望允许多次对函数进行“外部”赋值，只要外部函数的原型匹配（由于所有参数都具有相同的类型，我们只是必须检查参数数量是否匹配）。其次，我们要允许“外部化”一个函数，然后为其定义一个主体。在定义相互递归函数时，这很有用。
+在万花筒中，我选择在两种情况下允许对函数进行重新定义：首先，希望允许多次对函数进行“外部”赋值，只要外部函数的原型匹配（由于所有参数都具有相同的类型，只是必须检查参数数量是否匹配）。其次，要允许“外部化”一个函数，然后为其定义一个主体。在定义相互递归函数时，这很有用。
 
 ```ocaml
   (* If 'f' conflicted, there was already something named 'name'. If it
@@ -872,7 +872,7 @@ let codegen_proto = function
 in
 ```
 
-为了验证上述逻辑，我们首先检查现有功能是否为“空”。在这种情况下，empty表示其中没有基本块，这意味着它没有主体。如果没有主体，则为前向声明。由于在函数的完整定义后我们不允许任何操作，因此代码拒绝这种情况。如果先前对函数的引用是“外部”，我们只需验证该定义的自变量数量与该定义是否匹配即可。如果没有，我们将发出错误消息。
+为了验证上述逻辑，首先检查现有功能是否为“空”。在这种情况下，empty表示其中没有基本块，这意味着它没有主体。如果没有主体，则为前向声明。由于在函数的完整定义后不允许任何操作，因此代码拒绝这种情况。如果先前对函数的引用是“外部”，只需验证该定义的自变量数量与该定义是否匹配即可。如果没有，将发出错误消息。
 
 ```ocaml
 (* Set names for all arguments. *)
@@ -884,7 +884,7 @@ Array.iteri (fun i a ->
 f
 ```
 
-原型的最后一部分代码遍历了函数中的所有参数，将LLVM Argument对象的名称设置为匹配，并在Codegen.named_values映射中注册了参数以供Ast.Variable变体将来使用。设置完成后，它将Function对象返回给调用方。请注意，此处我们不检查是否存在冲突的参数名称（例如“ extern foo（aba）”）。这样做对于我们上面已经使用的机制非常简单。
+原型的最后一部分代码遍历了函数中的所有参数，将LLVM Argument对象的名称设置为匹配，并在Codegen.named_values映射中注册了参数以供Ast.Variable变体将来使用。设置完成后，它将Function对象返回给调用方。请注意，此处不检查是否存在冲突的参数名称（例如“ extern foo（aba）”）。这样做对于上面已经使用的机制非常简单。
 
 ```ocaml
 let codegen_func = function
@@ -893,7 +893,7 @@ let codegen_func = function
       let the_function = codegen_proto proto in
 ```
 
-函数定义的代码生成开始就非常简单：我们只需对原型（Proto）进行代码生成，并验证它是可以的。然后，我们清除Codegen.named_values地图以确保上次编译的函数中没有任何内容。原型的代码生成可确保有一个可供我们使用的LLVM Function对象。
+函数定义的代码生成开始就非常简单：只需对原型（Proto）进行代码生成，并验证它是可以的。然后，清除Codegen.named_values地图以确保上次编译的函数中没有任何内容。原型的代码生成可确保有一个可供使用的LLVM Function对象。
 
 ```ocaml
 (* Create a new basic block to start insertion into. *)
@@ -904,7 +904,7 @@ try
   let ret_val = codegen_expr body in
 ```
 
-现在，我们开始进行Codegen.builder设置。第一行创建一个新的基本块（名为“ entry”），将其插入the_function。然后第二行告诉构建者，新指令应插入到新基本块的末尾。LLVM中的基本块是定义控制流图的功能的重要组成部分。由于我们没有任何控制流，因此我们的函数此时仅包含一个块。我们将在第5章中解决此问题：)。
+现在，开始进行Codegen.builder设置。第一行创建一个新的基本块（名为“ entry”），将其插入the_function。然后第二行告诉构建者，新指令应插入到新基本块的末尾。LLVM中的基本块是定义控制流图的功能的重要组成部分。由于没有任何控制流，因此的函数此时仅包含一个块。将在第5章中解决此问题：)。
 
 ```ocaml
 let ret_val = codegen_expr body in
@@ -918,7 +918,7 @@ Llvm_analysis.assert_valid_function the_function;
 the_function
 ```
 
-设置插入点后，我们Codegen.codegen_func 将为函数的根表达式调用方法。如果没有错误发生，它将发出代码以将表达式计算到输入块中，并返回计算出的值。假设没有错误，我们然后创建LLVM ret指令，以完成该功能。构建函数后，我们将调用 Llvm_analysis.assert_valid_functionLLVM提供的。该函数对生成的代码进行各种一致性检查，以确定我们的编译器是否在正确执行所有操作。使用它很重要：它可以捕获很多错误。函数完成并验证后，我们将其返回。
+设置插入点后，Codegen.codegen_func 将为函数的根表达式调用方法。如果没有错误发生，它将发出代码以将表达式计算到输入块中，并返回计算出的值。假设没有错误，然后创建LLVM ret指令，以完成该功能。构建函数后，将调用 Llvm_analysis.assert_valid_functionLLVM提供的。该函数对生成的代码进行各种一致性检查，以确定的编译器是否在正确执行所有操作。使用它很重要：它可以捕获很多错误。函数完成并验证后，将其返回。
 
 ```ocaml
 with e ->
@@ -926,9 +926,9 @@ with e ->
   raise e
 ```
 
-这里剩下的唯一内容是错误情况的处理。为简单起见，我们仅通过删除使用该Llvm.delete_function方法生成的函数来处理此问题 。这使用户可以重新定义以前错误输入的函数：如果我们不删除它，该函数将与主体一起存在于符号表中，以防止将来重新定义。
+这里剩下的唯一内容是错误情况的处理。为简单起见，仅通过删除使用该Llvm.delete_function方法生成的函数来处理此问题 。这使用户可以重新定义以前错误输入的函数：如果不删除它，该函数将与主体一起存在于符号表中，以防止将来重新定义。
 
-这段代码确实有一个错误。由于Codegen.codegen_proto 可以返回先前定义的前向声明，因此我们的代码实际上可以删除前向声明。有多种方法可以修复此错误，请看您能想到些什么！这是一个测试用例：
+这段代码确实有一个错误。由于Codegen.codegen_proto 可以返回先前定义的前向声明，因此的代码实际上可以删除前向声明。有多种方法可以修复此错误，请看能想到些什么！这是一个测试用例：
 
 ```ocaml
 extern foo(a b);     # ok, defines foo.
@@ -937,4 +937,537 @@ def bar() foo(1, 2); # error, unknown function "foo"
 ```
 
 #### 驱动程序
+
+就目前而言，LLVM的代码生成并不能真正为带来很多好处，只是可以查看漂亮的IR调用。该示例代码将对Codegen的调用插入“ Toplevel.main_loop”中，然后转储LLVM IR。这为查看LLVM IR的简单功能提供了一种好方法。例如：
+
+```ocaml
+ready> 4+5;
+Read top-level expression:
+define double @""() {
+entry:
+        %addtmp = fadd double 4.000000e+00, 5.000000e+00
+        ret double %addtmp
+}
+```
+
+请注意解析器如何将顶级表达式转换为的匿名函数。在下一章中添加JIT支持时，这将非常方便。还要注意，该代码是按字面意思转录的，没有执行任何优化。
+
+```ocaml
+ready> def foo(a b) a*a + 2*a*b + b*b;
+Read function definition:
+define double @foo(double %a, double %b) {
+entry:
+        %multmp = fmul double %a, %a
+        %multmp1 = fmul double 2.000000e+00, %a
+        %multmp2 = fmul double %multmp1, %b
+        %addtmp = fadd double %multmp, %multmp2
+        %multmp3 = fmul double %b, %b
+        %addtmp4 = fadd double %addtmp, %multmp3
+        ret double %addtmp4
+}
+```
+
+这显示了一些简单的算法。请注意，它与用来创建指令的LLVM构建器调用非常相似。
+
+```ocaml
+ready> def bar(a) foo(a, 4.0) + bar(31337);
+Read function definition:
+define double @bar(double %a) {
+entry:
+        %calltmp = call double @foo(double %a, double 4.000000e+00)
+        %calltmp1 = call double @bar(double 3.133700e+04)
+        %addtmp = fadd double %calltmp, %calltmp1
+        ret double %addtmp
+}
+```
+
+这显示了一些函数调用。请注意，如果调用此函数，将花费很长时间执行。将来，将添加条件控制流，以使递归真正有用。
+
+```ocaml
+ready> extern cos(x);
+Read extern:
+declare double @cos(double)
+
+ready> cos(1.234);
+Read top-level expression:
+define double @""() {
+entry:
+        %calltmp = call double @cos(double 1.234000e+00)
+        ret double %calltmp
+}
+```
+
+这显示了libm“cos”函数的外部，以及对其的调用。
+
+```ocaml
+ready> ^D
+; ModuleID = 'my cool jit'
+
+define double @""() {
+entry:
+        %addtmp = fadd double 4.000000e+00, 5.000000e+00
+        ret double %addtmp
+}
+
+define double @foo(double %a, double %b) {
+entry:
+        %multmp = fmul double %a, %a
+        %multmp1 = fmul double 2.000000e+00, %a
+        %multmp2 = fmul double %multmp1, %b
+        %addtmp = fadd double %multmp, %multmp2
+        %multmp3 = fmul double %b, %b
+        %addtmp4 = fadd double %addtmp, %multmp3
+        ret double %addtmp4
+}
+
+define double @bar(double %a) {
+entry:
+        %calltmp = call double @foo(double %a, double 4.000000e+00)
+        %calltmp1 = call double @bar(double 3.133700e+04)
+        %addtmp = fadd double %calltmp, %calltmp1
+        ret double %addtmp
+}
+
+declare double @cos(double)
+
+define double @""() {
+entry:
+        %calltmp = call double @cos(double 1.234000e+00)
+        ret double %calltmp
+}
+```
+
+#### 完整代码清单
+
+```
+# Compile
+ocamlbuild toy.byte
+# Run
+./toy.byte
+```
+
+`myocamlbuild.ml`
+
+```ocaml
+open Ocamlbuild_plugin;;
+
+ocaml_lib ~extern:true "llvm";;
+ocaml_lib ~extern:true "llvm_analysis";;
+
+flag ["link"; "ocaml"; "g++"] (S[A"-cc"; A"g++"]);;
+```
+
+`token.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Lexer Tokens
+ *===----------------------------------------------------------------------===*)
+
+(* The lexer returns these 'Kwd' if it is an unknown character, otherwise one of
+ * these others for known things. *)
+type token =
+  (* commands *)
+  | Def | Extern
+
+  (* primary *)
+  | Ident of string | Number of float
+
+  (* unknown *)
+  | Kwd of char
+```
+
+`lexer.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Lexer
+ *===----------------------------------------------------------------------===*)
+
+let rec lex = parser
+  (* Skip any whitespace. *)
+  | [< ' (' ' | '\n' | '\r' | '\t'); stream >] -> lex stream
+
+  (* identifier: [a-zA-Z][a-zA-Z0-9] *)
+  | [< ' ('A' .. 'Z' | 'a' .. 'z' as c); stream >] ->
+      let buffer = Buffer.create 1 in
+      Buffer.add_char buffer c;
+      lex_ident buffer stream
+
+  (* number: [0-9.]+ *)
+  | [< ' ('0' .. '9' as c); stream >] ->
+      let buffer = Buffer.create 1 in
+      Buffer.add_char buffer c;
+      lex_number buffer stream
+
+  (* Comment until end of line. *)
+  | [< ' ('#'); stream >] ->
+      lex_comment stream
+
+  (* Otherwise, just return the character as its ascii value. *)
+  | [< 'c; stream >] ->
+      [< 'Token.Kwd c; lex stream >]
+
+  (* end of stream. *)
+  | [< >] -> [< >]
+
+and lex_number buffer = parser
+  | [< ' ('0' .. '9' | '.' as c); stream >] ->
+      Buffer.add_char buffer c;
+      lex_number buffer stream
+  | [< stream=lex >] ->
+      [< 'Token.Number (float_of_string (Buffer.contents buffer)); stream >]
+
+and lex_ident buffer = parser
+  | [< ' ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' as c); stream >] ->
+      Buffer.add_char buffer c;
+      lex_ident buffer stream
+  | [< stream=lex >] ->
+      match Buffer.contents buffer with
+      | "def" -> [< 'Token.Def; stream >]
+      | "extern" -> [< 'Token.Extern; stream >]
+      | id -> [< 'Token.Ident id; stream >]
+
+and lex_comment = parser
+  | [< ' ('\n'); stream=lex >] -> stream
+  | [< 'c; e=lex_comment >] -> e
+  | [< >] -> [< >]
+```
+
+`ast.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Abstract Syntax Tree (aka Parse Tree)
+ *===----------------------------------------------------------------------===*)
+
+(* expr - Base type for all expression nodes. *)
+type expr =
+  (* variant for numeric literals like "1.0". *)
+  | Number of float
+
+  (* variant for referencing a variable, like "a". *)
+  | Variable of string
+
+  (* variant for a binary operator. *)
+  | Binary of char * expr * expr
+
+  (* variant for function calls. *)
+  | Call of string * expr array
+
+(* proto - This type represents the "prototype" for a function, which captures
+ * its name, and its argument names (thus implicitly the number of arguments the
+ * function takes). *)
+type proto = Prototype of string * string array
+
+(* func - This type represents a function definition itself. *)
+type func = Function of proto * expr
+```
+
+`parser.ml`
+
+```ocaml
+(*===---------------------------------------------------------------------===
+ * Parser
+ *===---------------------------------------------------------------------===*)
+
+(* binop_precedence - This holds the precedence for each binary operator that is
+ * defined *)
+let binop_precedence:(char, int) Hashtbl.t = Hashtbl.create 10
+
+(* precedence - Get the precedence of the pending binary operator token. *)
+let precedence c = try Hashtbl.find binop_precedence c with Not_found -> -1
+
+(* primary
+ *   ::= identifier
+ *   ::= numberexpr
+ *   ::= parenexpr *)
+let rec parse_primary = parser
+  (* numberexpr ::= number *)
+  | [< 'Token.Number n >] -> Ast.Number n
+
+  (* parenexpr ::= '(' expression ')' *)
+  | [< 'Token.Kwd '('; e=parse_expr; 'Token.Kwd ')' ?? "expected ')'" >] -> e
+
+  (* identifierexpr
+   *   ::= identifier
+   *   ::= identifier '(' argumentexpr ')' *)
+  | [< 'Token.Ident id; stream >] ->
+      let rec parse_args accumulator = parser
+        | [< e=parse_expr; stream >] ->
+            begin parser
+              | [< 'Token.Kwd ','; e=parse_args (e :: accumulator) >] -> e
+              | [< >] -> e :: accumulator
+            end stream
+        | [< >] -> accumulator
+      in
+      let rec parse_ident id = parser
+        (* Call. *)
+        | [< 'Token.Kwd '(';
+             args=parse_args [];
+             'Token.Kwd ')' ?? "expected ')'">] ->
+            Ast.Call (id, Array.of_list (List.rev args))
+
+        (* Simple variable ref. *)
+        | [< >] -> Ast.Variable id
+      in
+      parse_ident id stream
+
+  | [< >] -> raise (Stream.Error "unknown token when expecting an expression.")
+
+(* binoprhs
+ *   ::= ('+' primary)* *)
+and parse_bin_rhs expr_prec lhs stream =
+  match Stream.peek stream with
+  (* If this is a binop, find its precedence. *)
+  | Some (Token.Kwd c) when Hashtbl.mem binop_precedence c ->
+      let token_prec = precedence c in
+
+      (* If this is a binop that binds at least as tightly as the current binop,
+       * consume it, otherwise we are done. *)
+      if token_prec < expr_prec then lhs else begin
+        (* Eat the binop. *)
+        Stream.junk stream;
+
+        (* Parse the primary expression after the binary operator. *)
+        let rhs = parse_primary stream in
+
+        (* Okay, we know this is a binop. *)
+        let rhs =
+          match Stream.peek stream with
+          | Some (Token.Kwd c2) ->
+              (* If BinOp binds less tightly with rhs than the operator after
+               * rhs, let the pending operator take rhs as its lhs. *)
+              let next_prec = precedence c2 in
+              if token_prec < next_prec
+              then parse_bin_rhs (token_prec + 1) rhs stream
+              else rhs
+          | _ -> rhs
+        in
+
+        (* Merge lhs/rhs. *)
+        let lhs = Ast.Binary (c, lhs, rhs) in
+        parse_bin_rhs expr_prec lhs stream
+      end
+  | _ -> lhs
+
+(* expression
+ *   ::= primary binoprhs *)
+and parse_expr = parser
+  | [< lhs=parse_primary; stream >] -> parse_bin_rhs 0 lhs stream
+
+(* prototype
+ *   ::= id '(' id* ')' *)
+let parse_prototype =
+  let rec parse_args accumulator = parser
+    | [< 'Token.Ident id; e=parse_args (id::accumulator) >] -> e
+    | [< >] -> accumulator
+  in
+
+  parser
+  | [< 'Token.Ident id;
+       'Token.Kwd '(' ?? "expected '(' in prototype";
+       args=parse_args [];
+       'Token.Kwd ')' ?? "expected ')' in prototype" >] ->
+      (* success. *)
+      Ast.Prototype (id, Array.of_list (List.rev args))
+
+  | [< >] ->
+      raise (Stream.Error "expected function name in prototype")
+
+(* definition ::= 'def' prototype expression *)
+let parse_definition = parser
+  | [< 'Token.Def; p=parse_prototype; e=parse_expr >] ->
+      Ast.Function (p, e)
+
+(* toplevelexpr ::= expression *)
+let parse_toplevel = parser
+  | [< e=parse_expr >] ->
+      (* Make an anonymous proto. *)
+      Ast.Function (Ast.Prototype ("", [||]), e)
+
+(*  external ::= 'extern' prototype *)
+let parse_extern = parser
+  | [< 'Token.Extern; e=parse_prototype >] -> e
+```
+
+`codegen.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Code Generation
+ *===----------------------------------------------------------------------===*)
+
+open Llvm
+
+exception Error of string
+
+let context = global_context ()
+let the_module = create_module context "my cool jit"
+let builder = builder context
+let named_values:(string, llvalue) Hashtbl.t = Hashtbl.create 10
+let double_type = double_type context
+
+let rec codegen_expr = function
+  | Ast.Number n -> const_float double_type n
+  | Ast.Variable name ->
+      (try Hashtbl.find named_values name with
+        | Not_found -> raise (Error "unknown variable name"))
+  | Ast.Binary (op, lhs, rhs) ->
+      let lhs_val = codegen_expr lhs in
+      let rhs_val = codegen_expr rhs in
+      begin
+        match op with
+        | '+' -> build_add lhs_val rhs_val "addtmp" builder
+        | '-' -> build_sub lhs_val rhs_val "subtmp" builder
+        | '*' -> build_mul lhs_val rhs_val "multmp" builder
+        | '<' ->
+            (* Convert bool 0/1 to double 0.0 or 1.0 *)
+            let i = build_fcmp Fcmp.Ult lhs_val rhs_val "cmptmp" builder in
+            build_uitofp i double_type "booltmp" builder
+        | _ -> raise (Error "invalid binary operator")
+      end
+  | Ast.Call (callee, args) ->
+      (* Look up the name in the module table. *)
+      let callee =
+        match lookup_function callee the_module with
+        | Some callee -> callee
+        | None -> raise (Error "unknown function referenced")
+      in
+      let params = params callee in
+
+      (* If argument mismatch error. *)
+      if Array.length params == Array.length args then () else
+        raise (Error "incorrect # arguments passed");
+      let args = Array.map codegen_expr args in
+      build_call callee args "calltmp" builder
+
+let codegen_proto = function
+  | Ast.Prototype (name, args) ->
+      (* Make the function type: double(double,double) etc. *)
+      let doubles = Array.make (Array.length args) double_type in
+      let ft = function_type double_type doubles in
+      let f =
+        match lookup_function name the_module with
+        | None -> declare_function name ft the_module
+
+        (* If 'f' conflicted, there was already something named 'name'. If it
+         * has a body, don't allow redefinition or reextern. *)
+        | Some f ->
+            (* If 'f' already has a body, reject this. *)
+            if block_begin f <> At_end f then
+              raise (Error "redefinition of function");
+
+            (* If 'f' took a different number of arguments, reject. *)
+            if element_type (type_of f) <> ft then
+              raise (Error "redefinition of function with different # args");
+            f
+      in
+
+      (* Set names for all arguments. *)
+      Array.iteri (fun i a ->
+        let n = args.(i) in
+        set_value_name n a;
+        Hashtbl.add named_values n a;
+      ) (params f);
+      f
+
+let codegen_func = function
+  | Ast.Function (proto, body) ->
+      Hashtbl.clear named_values;
+      let the_function = codegen_proto proto in
+
+      (* Create a new basic block to start insertion into. *)
+      let bb = append_block context "entry" the_function in
+      position_at_end bb builder;
+
+      try
+        let ret_val = codegen_expr body in
+
+        (* Finish off the function. *)
+        let _ = build_ret ret_val builder in
+
+        (* Validate the generated code, checking for consistency. *)
+        Llvm_analysis.assert_valid_function the_function;
+
+        the_function
+      with e ->
+        delete_function the_function;
+        raise e
+```
+
+`toplevel.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Top-Level parsing and JIT Driver
+ *===----------------------------------------------------------------------===*)
+
+open Llvm
+
+(* top ::= definition | external | expression | ';' *)
+let rec main_loop stream =
+  match Stream.peek stream with
+  | None -> ()
+
+  (* ignore top-level semicolons. *)
+  | Some (Token.Kwd ';') ->
+      Stream.junk stream;
+      main_loop stream
+
+  | Some token ->
+      begin
+        try match token with
+        | Token.Def ->
+            let e = Parser.parse_definition stream in
+            print_endline "parsed a function definition.";
+            dump_value (Codegen.codegen_func e);
+        | Token.Extern ->
+            let e = Parser.parse_extern stream in
+            print_endline "parsed an extern.";
+            dump_value (Codegen.codegen_proto e);
+        | _ ->
+            (* Evaluate a top-level expression into an anonymous function. *)
+            let e = Parser.parse_toplevel stream in
+            print_endline "parsed a top-level expr";
+            dump_value (Codegen.codegen_func e);
+        with Stream.Error s | Codegen.Error s ->
+          (* Skip token for error recovery. *)
+          Stream.junk stream;
+          print_endline s;
+      end;
+      print_string "ready> "; flush stdout;
+      main_loop stream
+```
+
+`toy.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Main driver code.
+ *===----------------------------------------------------------------------===*)
+
+open Llvm
+
+let main () =
+  (* Install standard binary operators.
+   * 1 is the lowest precedence. *)
+  Hashtbl.add Parser.binop_precedence '<' 10;
+  Hashtbl.add Parser.binop_precedence '+' 20;
+  Hashtbl.add Parser.binop_precedence '-' 20;
+  Hashtbl.add Parser.binop_precedence '*' 40;    (* highest. *)
+
+  (* Prime the first token. *)
+  print_string "ready> "; flush stdout;
+  let stream = Lexer.lex (Stream.of_channel stdin) in
+
+  (* Run the main "interpreter loop" now. *)
+  Toplevel.main_loop stream;
+
+  (* Print out all the generated code. *)
+  dump_module Codegen.the_module
+;;
+
+main ()
+```
 
