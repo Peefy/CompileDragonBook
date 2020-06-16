@@ -213,7 +213,7 @@ type expr =
 
 `Variable`变量捕获变量名，`Binary`二进制运算符捕获其操作码（例如'+'），`Call`调用捕获函数名以及任何参数表达式的列表。
 
-对于基本语言，这些都是我定义的所有表达节点。因为它没有条件控制流，所以它不是图灵完备的。
+对于基本语言，这些都是定义的所有表达节点。因为它没有条件控制流，所以它不是图灵完备的。
 
 ```ocaml
 (* proto - This type represents the "prototype" for a function, which captures
@@ -843,9 +843,9 @@ let codegen_proto = function
         match lookup_function name the_module with
 ```
 
-此代码将大量功能打包成几行。首先请注意，此函数返回“ Function *”而不是“ Value *”（尽管目前它们都llvalue在ocaml 中建模）。因为“原型”实际上是在谈论函数的外部接口（而不是表达式计算的值），所以有意义的是，它返回代码生成时对应的LLVM函数。
+此代码将大量功能打包成几行。首先请注意，此函数返回“Function *”而不是“Value *”（尽管目前它们都llvalue在ocaml 中建模）。因为“原型”实际上是在谈论函数的外部接口（而不是表达式计算的值），所以有意义的是，它返回代码生成时对应的LLVM函数。
 
-调用Llvm.function_typecreate Llvm.llvalue应该用于给定的原型。由于万花筒中的所有函数参数均为double类型，因此第一行将创建一个“ N”个LLVM double类型的向量。然后，它使用该Llvm.function_type方法来创建一个函数类型，该函数类型以“ N”个double作为参数，并返回一个double作为结果，而不是vararg（使用function Llvm.var_arg_function_type）。请注意，LLVM中的类型就像的一样是唯一Constant的，因此不必“新建”一个类型，而是“获取”它。
+调用Llvm.function_typecreate Llvm.llvalue应该用于给定的原型。由于语言中的所有函数参数均为double类型，因此第一行将创建一个“N”个LLVM double类型的向量。然后，它使用该Llvm.function_type方法来创建一个函数类型，该函数类型以“N”个double作为参数，并返回一个double作为结果，而不是vararg（使用function Llvm.var_arg_function_type）。请注意，LLVM中的类型就像的一样是唯一Constant的，因此不必“新建”一个类型，而是“获取”它。
 
 上面的最后一行检查函数是否已在中定义 Codegen.the_module。如果没有，将创建它。
 
@@ -853,9 +853,9 @@ let codegen_proto = function
 | None -> declare_function name ft the_module
 ```
 
-这表明要使用的类型和名称，以及要插入的模块。默认情况下，假设一个函数具有 Llvm.Linkage.ExternalLinkage。“ 外部链接 ”是指该功能可以在当前模块外部定义和/或可以由模块外部的函数调用。name传入的“ ”是用户指定的名称：此名称已注册在“ Codegen.the_module”符号表中，上面的函数调用代码使用该符号表。
+这表明要使用的类型和名称，以及要插入的模块。默认情况下，假设一个函数具有 Llvm.Linkage.ExternalLinkage。“外部链接 ”是指该功能可以在当前模块外部定义和/或可以由模块外部的函数调用。name传入的“”是用户指定的名称：此名称已注册在“Codegen.the_module”符号表中，上面的函数调用代码使用该符号表。
 
-在万花筒中，我选择在两种情况下允许对函数进行重新定义：首先，希望允许多次对函数进行“外部”赋值，只要外部函数的原型匹配（由于所有参数都具有相同的类型，只是必须检查参数数量是否匹配）。其次，要允许“外部化”一个函数，然后为其定义一个主体。在定义相互递归函数时，这很有用。
+在语言中，选择在两种情况下允许对函数进行重新定义：首先，希望允许多次对函数进行“外部”赋值，只要外部函数的原型匹配（由于所有参数都具有相同的类型，只是必须检查参数数量是否匹配）。其次，要允许“外部化”一个函数，然后为其定义一个主体。在定义相互递归函数时，这很有用。
 
 ```ocaml
   (* If 'f' conflicted, there was already something named 'name'. If it
@@ -884,7 +884,7 @@ Array.iteri (fun i a ->
 f
 ```
 
-原型的最后一部分代码遍历了函数中的所有参数，将LLVM Argument对象的名称设置为匹配，并在Codegen.named_values映射中注册了参数以供Ast.Variable变体将来使用。设置完成后，它将Function对象返回给调用方。请注意，此处不检查是否存在冲突的参数名称（例如“ extern foo（aba）”）。这样做对于上面已经使用的机制非常简单。
+原型的最后一部分代码遍历了函数中的所有参数，将LLVM Argument对象的名称设置为匹配，并在Codegen.named_values映射中注册了参数以供Ast.Variable变体将来使用。设置完成后，它将Function对象返回给调用方。请注意，此处不检查是否存在冲突的参数名称（例如“extern foo（aba）”）。这样做对于上面已经使用的机制非常简单。
 
 ```ocaml
 let codegen_func = function
@@ -904,7 +904,7 @@ try
   let ret_val = codegen_expr body in
 ```
 
-现在，开始进行Codegen.builder设置。第一行创建一个新的基本块（名为“ entry”），将其插入the_function。然后第二行告诉构建者，新指令应插入到新基本块的末尾。LLVM中的基本块是定义控制流图的功能的重要组成部分。由于没有任何控制流，因此的函数此时仅包含一个块。将在第5章中解决此问题：)。
+现在，开始进行Codegen.builder设置。第一行创建一个新的基本块（名为“entry”），将其插入the_function。然后第二行告诉构建者，新指令应插入到新基本块的末尾。LLVM中的基本块是定义控制流图的功能的重要组成部分。由于没有任何控制流，因此的函数此时仅包含一个块。将在第5章中解决此问题：)。
 
 ```ocaml
 let ret_val = codegen_expr body in
@@ -938,7 +938,7 @@ def bar() foo(1, 2); # error, unknown function "foo"
 
 #### 驱动程序
 
-就目前而言，LLVM的代码生成并不能真正为带来很多好处，只是可以查看漂亮的IR调用。该示例代码将对Codegen的调用插入“ Toplevel.main_loop”中，然后转储LLVM IR。这为查看LLVM IR的简单功能提供了一种好方法。例如：
+就目前而言，LLVM的代码生成并不能真正为带来很多好处，只是可以查看漂亮的IR调用。该示例代码将对Codegen的调用插入“Toplevel.main_loop”中，然后转储LLVM IR。这为查看LLVM IR的简单函数提供了一种好方法。例如：
 
 ```ocaml
 ready> 4+5;
@@ -1470,4 +1470,128 @@ let main () =
 
 main ()
 ```
+
+### 添加JIT和优化器支持
+
+#### 一般的常量折叠优化
+
+```ocaml
+ready> def test(x) 1+2+x;
+Read function definition:
+define double @test(double %x) {
+entry:
+        %addtmp = fadd double 1.000000e+00, 2.000000e+00
+        %addtmp1 = fadd double %addtmp, %x
+        ret double %addtmp1
+}
+```
+
+此代码是通过解析输入构建的AST的非常非常文字的形式。因此，此转录缺少诸如恒定折叠（在上面的示例中希望获得“3”）之类的优化以及其他更重要的优化。特别是，常量折叠是非常常见且非常重要的优化：如此之多，以至于许多语言实现者在其AST表示中实现了常量折叠支持。add x, 3.0
+
+使用LLVM，在AST中不需要此支持。由于构建LLVM IR的所有调用都是通过LLVM构建器进行的，因此如果构建器本身在调用时检查是否有持续的折叠机会，那就太好了。如果是这样，它可以只执行常量折叠并返回常量，而不用创建指令。这正是LLVMFoldingBuilder该类所做的。
+
+所做的就是从切换LLVMBuilder到LLVMFoldingBuilder。尽管没有更改任何其他代码，但是现在所有的指令都隐式不变地折叠了，而无需进行任何处理。例如，上面的输入现在编译为：
+
+```ocaml
+ready> def test(x) 1+2+x;
+Read function definition:
+define double @test(double %x) {
+entry:
+        %addtmp = fadd double 3.000000e+00, %x
+        ret double %addtmp
+}
+```
+
+建议LLVMFoldingBuilder在生成此类代码时始终使用 。它没有使用“语法上的开销”（不必在任何地方都使用常量检查来使编译器丑陋），并且在某些情况下（特别是对于具有宏预处理程序或使用很多常量）。
+
+另一方面，LLVMFoldingBuilder它受以下事实的限制：它在生成代码时会与代码内联地进行所有分析。如果使用一个稍微复杂一点的示例：
+
+```ocaml
+ready> def test(x) (1+2+x)*(x+(1+2));
+ready> Read function definition:
+define double @test(double %x) {
+entry:
+        %addtmp = fadd double 3.000000e+00, %x
+        %addtmp1 = fadd double %x, 3.000000e+00
+        %multmp = fmul double %addtmp, %addtmp1
+        ret double %multmp
+}
+```
+
+在这种情况下，乘法的LHS和RHS是相同的值，很希望看到它生成两次，而不是两次计算一次。`tmp = x+3; result = tmp*tmp;x*3`
+
+不幸的是，没有任何本地分析方法能够检测和纠正此问题。这需要两种转换：表达式的重新关联（以使添加在词法上相同）和通用子表达式消除（CSE）以删除冗余添加指令。
+
+#### LLVM 优化过程
+
+LLVM提供了许多优化过程，这些过程可以完成许多不同的事情并具有不同的权衡。与其他系统不同，LLVM不会错误地认为一组优化适用于所有语言和所有情况。LLVM允许编译器实施者对要使用的优化，以何种顺序以及在哪种情况下做出完整的决策。
+
+LLVM支持两个“整个模块”遍历，它们遍历了尽可能多的代码体（通常是整个文件，但是如果在链接时运行，则这可能是整个程序的重要部分） 。它还支持并包括“按函数”遍历，这些遍历仅一次在一项函数上运行，而无需查看其他函数。
+
+```ocaml
+(* Create the JIT. *)
+let the_execution_engine = ExecutionEngine.create Codegen.the_module in
+let the_fpm = PassManager.create_function Codegen.the_module in
+
+(* Set up the optimizer pipeline.  Start with registering info about how the
+ * target lays out data structures. *)
+DataLayout.add (ExecutionEngine.target_data the_execution_engine) the_fpm;
+
+(* Do simple "peephole" optimizations and bit-twiddling optzn. *)
+add_instruction_combining the_fpm;
+
+(* reassociate expressions. *)
+add_reassociation the_fpm;
+
+(* Eliminate Common SubExpressions. *)
+add_gvn the_fpm;
+
+(* Simplify the control flow graph (deleting unreachable blocks, etc). *)
+add_cfg_simplification the_fpm;
+
+ignore (PassManager.initialize the_fpm);
+
+(* Run the main "interpreter loop" now. *)
+Toplevel.main_loop the_fpm the_execution_engine stream;
+```
+
+实质是“the_fpm” 的定义。它需要指向的指针the_module来构造自身。设置完成后，将使用一系列“添加”调用来添加一系列LLVM通道。第一遍基本上是样板，它增加了一遍，以便以后的优化知道程序中数据结构的布局。“the_execution_engine”变量与JIT有关，将在下一部分中进行介绍。
+
+在这种情况下，选择添加4个优化遍。在此处选择的过程是一组相当标准的“清理”优化，可用于各种代码。
+
+一旦Llvm.PassManager.设置好后，需要利用它。通过在构造新创建的函数之后（在中Codegen.codegen_func）但在将其返回给客户端之前运行它来执行此操作：
+
+```ocaml
+let codegen_func the_fpm = function
+      ...
+      try
+        let ret_val = codegen_expr body in
+
+        (* Finish off the function. *)
+        let _ = build_ret ret_val builder in
+
+        (* Validate the generated code, checking for consistency. *)
+        Llvm_analysis.assert_valid_function the_function;
+
+        (* Optimize the function. *)
+        let _ = PassManager.run_function the_function the_fpm in
+
+        the_function
+```
+
+代码测试:
+
+```ocaml
+ready> def test(x) (1+2+x)*(x+(1+2));
+ready> Read function definition:
+define double @test(double %x) {
+entry:
+        %addtmp = fadd double %x, 3.000000e+00
+        %multmp = fmul double %addtmp, %addtmp
+        ret double %multmp
+}
+```
+
+#### 添加一个JIT编译器
+
 
