@@ -2182,6 +2182,134 @@ let main () =
 main ()
 ```
 
-### 扩展语言：控制流
+### 扩展语言：控制流解析
 
+```vb
+def fib(x)
+  if x < 3 then
+    1
+  else
+    fib(x-1)+fib(x-2);
+```
 
+#### 用于If/Then/Else的Lexer扩展
+
+```ocaml
+...
+match Buffer.contents buffer with
+| "def" -> [< 'Token.Def; stream >]
+| "extern" -> [< 'Token.Extern; stream >]
+| "if" -> [< 'Token.If; stream >]
+| "then" -> [< 'Token.Then; stream >]
+| "else" -> [< 'Token.Else; stream >]
+| "for" -> [< 'Token.For; stream >]
+| "in" -> [< 'Token.In; stream >]
+| id -> [< 'Token.Ident id; stream >]
+```
+
+#### 用于扩展If/Then的AST扩展
+
+```ocaml
+type expr =
+  ...
+  (* variant for if/then/else. *)
+  | If of expr * expr * expr
+```
+
+#### If/Then/Else的解析器扩展
+
+```ocaml
+let rec parse_primary = parser
+  ...
+  (* ifexpr ::= 'if' expr 'then' expr 'else' expr *)
+  | [< 'Token.If; c=parse_expr;
+       'Token.Then ?? "expected 'then'"; t=parse_expr;
+       'Token.Else ?? "expected 'else'"; e=parse_expr >] ->
+      Ast.If (c, t, e)
+```
+
+#### LLVM IR for If/Then/Else 
+
+```ocaml
+extern foo();
+extern bar();
+def baz(x) if x then foo() else bar();
+```
+
+如果禁用优化
+
+```ocaml
+declare double @foo()
+
+declare double @bar()
+
+define double @baz(double %x) {
+entry:
+  %ifcond = fcmp one double %x, 0.000000e+00
+  br i1 %ifcond, label %then, label %else
+
+then:    ; preds = %entry
+  %calltmp = call double @foo()
+  br label %ifcont
+
+else:    ; preds = %entry
+  %calltmp1 = call double @bar()
+  br label %ifcont
+
+ifcont:    ; preds = %else, %then
+  %iftmp = phi double [ %calltmp, %then ], [ %calltmp1, %else ]
+  ret double %iftmp
+}
+```
+
+```ocaml
+(* Emit 'then' value. *)
+position_at_end then_bb builder;
+let then_val = codegen_expr then_ in
+
+(* Codegen of 'then' can change the current block, update then_bb for the
+ * phi. We create a new name because one is used for the phi node, and the
+ * other is used for the conditional branch. *)
+let new_then_bb = insertion_block builder in
+```
+
+```ocaml
+(* Emit 'else' value. *)
+let else_bb = append_block context "else" the_function in
+position_at_end else_bb builder;
+let else_val = codegen_expr else_ in
+
+(* Codegen of 'else' can change the current block, update else_bb for the
+ * phi. *)
+let new_else_bb = insertion_block builder in
+```
+
+```ocaml
+(* Return to the start block to add the conditional branch. *)
+position_at_end start_bb builder;
+ignore (build_cond_br cond_val then_bb else_bb builder);
+```
+
+```ocaml
+(* Set a unconditional branch at the end of the 'then' block and the
+ * 'else' block to the 'merge' block. *)
+position_at_end new_then_bb builder; ignore (build_br merge_bb builder);
+position_at_end new_else_bb builder; ignore (build_br merge_bb builder);
+
+(* Finally, set the builder to the end of the merge block. *)
+position_at_end merge_bb builder;
+
+phi
+```
+
+#### 'for'循环表达式
+
+```vb
+extern putchard(char);
+def printstar(n)
+  for i = 1, i < n, 1.0 in
+    putchard(42);  # ascii 42 = '*'
+
+# print 100 '*' characters
+printstar(100);
+```
