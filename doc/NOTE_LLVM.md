@@ -3160,3 +3160,990 @@ extern double putchard(double X) {
   return 0;
 }
 ```
+
+### 扩展语言：用户定义的运算符
+
+将添加的两个特定功能是可编程的一元运算符以及二进制运算符。例如：
+
+```vb
+# Logical unary not.
+def unary!(v)
+  if v then
+    0
+  else
+    1;
+
+# Define > with the same precedence as <.
+def binary> 10 (LHS RHS)
+  RHS < LHS;
+
+# Binary "logical or", (note that it does not "short circuit")
+def binary| 5 (LHS RHS)
+  if LHS then
+    1
+  else if RHS then
+    1
+  else
+    0;
+
+# Define = with slightly lower precedence than relationals.
+def binary= 9 (LHS RHS)
+  !(LHS < RHS | LHS > RHS);
+```
+
+#### 用户定义的二元运算符
+
+在当前的框架中，添加对用户定义的二进制运算符的支持非常简单。将首先添加对一元/二元关键字的支持：
+
+```ocaml
+type token =
+  ...
+  (* operators *)
+  | Binary | Unary
+
+...
+
+and lex_ident buffer = parser
+  ...
+      | "for" -> [< 'Token.For; stream >]
+      | "in" -> [< 'Token.In; stream >]
+      | "binary" -> [< 'Token.Binary; stream >]
+      | "unary" -> [< 'Token.Unary; stream >]
+```
+
+```ocaml
+(* proto - This type represents the "prototype" for a function, which captures
+ * its name, and its argument names (thus implicitly the number of arguments the
+ * function takes). *)
+type proto =
+  | Prototype of string * string array
+  | BinOpPrototype of string * string array * int
+```
+
+基本上，除了知道原型的名称之外，现在还要跟踪它是否是运算符，以及是否是运算符，以及该运算符的优先级。优先级仅用于二进制运算符（如下所示，它不适用于一元运算符）。现在，已经有了一种表示用户定义的运算符原型的方法，需要对其进行解析：
+
+```ocaml
+(* prototype
+ *   ::= id '(' id* ')'
+ *   ::= binary LETTER number? (id, id)
+ *   ::= unary LETTER number? (id) *)
+let parse_prototype =
+  let rec parse_args accumulator = parser
+    | [< 'Token.Ident id; e=parse_args (id::accumulator) >] -> e
+    | [< >] -> accumulator
+  in
+  let parse_operator = parser
+    | [< 'Token.Unary >] -> "unary", 1
+    | [< 'Token.Binary >] -> "binary", 2
+  in
+  let parse_binary_precedence = parser
+    | [< 'Token.Number n >] -> int_of_float n
+    | [< >] -> 30
+  in
+  parser
+  | [< 'Token.Ident id;
+       'Token.Kwd '(' ?? "expected '(' in prototype";
+       args=parse_args [];
+       'Token.Kwd ')' ?? "expected ')' in prototype" >] ->
+      (* success. *)
+      Ast.Prototype (id, Array.of_list (List.rev args))
+  | [< (prefix, kind)=parse_operator;
+       'Token.Kwd op ?? "expected an operator";
+       (* Read the precedence if present. *)
+       binary_precedence=parse_binary_precedence;
+       'Token.Kwd '(' ?? "expected '(' in prototype";
+        args=parse_args [];
+       'Token.Kwd ')' ?? "expected ')' in prototype" >] ->
+      let name = prefix ^ (String.make 1 op) in
+      let args = Array.of_list (List.rev args) in
+
+      (* Verify right number of arguments for operator. *)
+      if Array.length args != kind
+      then raise (Stream.Error "invalid number of operands for operator")
+      else
+        if kind == 1 then
+          Ast.Prototype (name, args)
+        else
+          Ast.BinOpPrototype (name, args, binary_precedence)
+  | [< >] ->
+      raise (Stream.Error "expected function name in prototype")
+```
+
+对这些二进制运算符的代码生成支持:
+
+```ocaml
+let codegen_expr = function
+  ...
+  | Ast.Binary (op, lhs, rhs) ->
+      let lhs_val = codegen_expr lhs in
+      let rhs_val = codegen_expr rhs in
+      begin
+        match op with
+        | '+' -> build_add lhs_val rhs_val "addtmp" builder
+        | '-' -> build_sub lhs_val rhs_val "subtmp" builder
+        | '*' -> build_mul lhs_val rhs_val "multmp" builder
+        | '<' ->
+            (* Convert bool 0/1 to double 0.0 or 1.0 *)
+            let i = build_fcmp Fcmp.Ult lhs_val rhs_val "cmptmp" builder in
+            build_uitofp i double_type "booltmp" builder
+        | _ ->
+            (* If it wasn't a builtin binary operator, it must be a user defined
+             * one. Emit a call to it. *)
+            let callee = "binary" ^ (String.make 1 op) in
+            let callee =
+              match lookup_function callee the_module with
+              | Some callee -> callee
+              | None -> raise (Error "binary operator not found!")
+            in
+            build_call callee [|lhs_val; rhs_val|] "binop" builder
+      end
+```
+
+```ocaml
+let codegen_func the_fpm = function
+  | Ast.Function (proto, body) ->
+      Hashtbl.clear named_values;
+      let the_function = codegen_proto proto in
+
+      (* If this is an operator, install it. *)
+      begin match proto with
+      | Ast.BinOpPrototype (name, args, prec) ->
+          let op = name.[String.length name - 1] in
+          Hashtbl.add Parser.binop_precedence op prec;
+      | _ -> ()
+      end;
+
+      (* Create a new basic block to start insertion into. *)
+      let bb = append_block context "entry" the_function in
+      position_at_end bb builder;
+      ...
+```
+
+#### 用户定义的一元运算符
+
+```ocaml
+type expr =
+  ...
+  (* variant for a unary operator. *)
+  | Unary of char * expr
+  ...
+```
+
+解析一元运算符非常简单：
+
+```ocaml
+(* unary
+ *   ::= primary
+ *   ::= '!' unary *)
+and parse_unary = parser
+  (* If this is a unary operator, read it. *)
+  | [< 'Token.Kwd op when op != '(' && op != ')'; operand=parse_expr >] ->
+      Ast.Unary (op, operand)
+
+  (* If the current token is not an operator, it must be a primary expr. *)
+  | [< stream >] -> parse_primary stream
+```
+
+请注意，一元运算符不能像二元运算符那样具有模棱两可的解析，因此不需要优先级信息。这个函数的问题是，需要从某个地方调用ParseUnary。为此，将以前的ParsePrimary调用者parse_unary改为：
+
+```ocaml
+(* binoprhs
+ *   ::= ('+' primary)* *)
+and parse_bin_rhs expr_prec lhs stream =
+        ...
+        (* Parse the unary expression after the binary operator. *)
+        let rhs = parse_unary stream in
+        ...
+
+...
+
+(* expression
+ *   ::= primary binoprhs *)
+and parse_expr = parser
+  | [< lhs=parse_unary; stream >] -> parse_bin_rhs 0 lhs stream
+```
+
+通过这两个简单的更改，现在可以解析一元运算符并为其构建AST。接下来，需要为原型添加解析器支持，以解析一元运算符原型。将上面的二进制运算符代码扩展为：
+
+```ocaml
+(* prototype
+ *   ::= id '(' id* ')'
+ *   ::= binary LETTER number? (id, id)
+ *   ::= unary LETTER number? (id) *)
+let parse_prototype =
+  let rec parse_args accumulator = parser
+    | [< 'Token.Ident id; e=parse_args (id::accumulator) >] -> e
+    | [< >] -> accumulator
+  in
+  let parse_operator = parser
+    | [< 'Token.Unary >] -> "unary", 1
+    | [< 'Token.Binary >] -> "binary", 2
+  in
+  let parse_binary_precedence = parser
+    | [< 'Token.Number n >] -> int_of_float n
+    | [< >] -> 30
+  in
+  parser
+  | [< 'Token.Ident id;
+       'Token.Kwd '(' ?? "expected '(' in prototype";
+       args=parse_args [];
+       'Token.Kwd ')' ?? "expected ')' in prototype" >] ->
+      (* success. *)
+      Ast.Prototype (id, Array.of_list (List.rev args))
+  | [< (prefix, kind)=parse_operator;
+       'Token.Kwd op ?? "expected an operator";
+       (* Read the precedence if present. *)
+       binary_precedence=parse_binary_precedence;
+       'Token.Kwd '(' ?? "expected '(' in prototype";
+        args=parse_args [];
+       'Token.Kwd ')' ?? "expected ')' in prototype" >] ->
+      let name = prefix ^ (String.make 1 op) in
+      let args = Array.of_list (List.rev args) in
+
+      (* Verify right number of arguments for operator. *)
+      if Array.length args != kind
+      then raise (Stream.Error "invalid number of operands for operator")
+      else
+        if kind == 1 then
+          Ast.Prototype (name, args)
+        else
+          Ast.BinOpPrototype (name, args, binary_precedence)
+  | [< >] ->
+      raise (Stream.Error "expected function name in prototype")
+```
+
+与二元运算符一样，用包含运算符的名称来命名一元运算符。这在代码生成时为提供了帮助。说到最后，需要添加的内容是对一元运算符的代码生成支持。看起来像这样：
+
+```ocaml
+let rec codegen_expr = function
+  ...
+  | Ast.Unary (op, operand) ->
+      let operand = codegen_expr operand in
+      let callee = "unary" ^ (String.make 1 op) in
+      let callee =
+        match lookup_function callee the_module with
+        | Some callee -> callee
+        | None -> raise (Error "unknown unary operator")
+      in
+      build_call callee [|operand|] "unop" builder
+```
+
+该代码类似于但比二进制运算符的代码简单。它之所以简单，主要是因为它不需要处理任何预定义的运算符。
+
+#### 完整代码清单
+
+这是运行的示例的完整代码清单，并通过if/then/else和expression进行了增强。要构建此示例，请使用：
+
+`token.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Lexer Tokens
+ *===----------------------------------------------------------------------===*)
+
+(* The lexer returns these 'Kwd' if it is an unknown character, otherwise one of
+ * these others for known things. *)
+type token =
+  (* commands *)
+  | Def | Extern
+
+  (* primary *)
+  | Ident of string | Number of float
+
+  (* unknown *)
+  | Kwd of char
+
+  (* control *)
+  | If | Then | Else
+  | For | In
+
+  (* operators *)
+  | Binary | Unary
+```
+
+`lexer.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Lexer
+ *===----------------------------------------------------------------------===*)
+
+let rec lex = parser
+  (* Skip any whitespace. *)
+  | [< ' (' ' | '\n' | '\r' | '\t'); stream >] -> lex stream
+
+  (* identifier: [a-zA-Z][a-zA-Z0-9] *)
+  | [< ' ('A' .. 'Z' | 'a' .. 'z' as c); stream >] ->
+      let buffer = Buffer.create 1 in
+      Buffer.add_char buffer c;
+      lex_ident buffer stream
+
+  (* number: [0-9.]+ *)
+  | [< ' ('0' .. '9' as c); stream >] ->
+      let buffer = Buffer.create 1 in
+      Buffer.add_char buffer c;
+      lex_number buffer stream
+
+  (* Comment until end of line. *)
+  | [< ' ('#'); stream >] ->
+      lex_comment stream
+
+  (* Otherwise, just return the character as its ascii value. *)
+  | [< 'c; stream >] ->
+      [< 'Token.Kwd c; lex stream >]
+
+  (* end of stream. *)
+  | [< >] -> [< >]
+
+and lex_number buffer = parser
+  | [< ' ('0' .. '9' | '.' as c); stream >] ->
+      Buffer.add_char buffer c;
+      lex_number buffer stream
+  | [< stream=lex >] ->
+      [< 'Token.Number (float_of_string (Buffer.contents buffer)); stream >]
+
+and lex_ident buffer = parser
+  | [< ' ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' as c); stream >] ->
+      Buffer.add_char buffer c;
+      lex_ident buffer stream
+  | [< stream=lex >] ->
+      match Buffer.contents buffer with
+      | "def" -> [< 'Token.Def; stream >]
+      | "extern" -> [< 'Token.Extern; stream >]
+      | "if" -> [< 'Token.If; stream >]
+      | "then" -> [< 'Token.Then; stream >]
+      | "else" -> [< 'Token.Else; stream >]
+      | "for" -> [< 'Token.For; stream >]
+      | "in" -> [< 'Token.In; stream >]
+      | "binary" -> [< 'Token.Binary; stream >]
+      | "unary" -> [< 'Token.Unary; stream >]
+      | id -> [< 'Token.Ident id; stream >]
+
+and lex_comment = parser
+  | [< ' ('\n'); stream=lex >] -> stream
+  | [< 'c; e=lex_comment >] -> e
+  | [< >] -> [< >]
+```
+
+`ast.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Abstract Syntax Tree (aka Parse Tree)
+ *===----------------------------------------------------------------------===*)
+
+(* expr - Base type for all expression nodes. *)
+type expr =
+  (* variant for numeric literals like "1.0". *)
+  | Number of float
+
+  (* variant for referencing a variable, like "a". *)
+  | Variable of string
+
+  (* variant for a unary operator. *)
+  | Unary of char * expr
+
+  (* variant for a binary operator. *)
+  | Binary of char * expr * expr
+
+  (* variant for function calls. *)
+  | Call of string * expr array
+
+  (* variant for if/then/else. *)
+  | If of expr * expr * expr
+
+  (* variant for for/in. *)
+  | For of string * expr * expr * expr option * expr
+
+(* proto - This type represents the "prototype" for a function, which captures
+ * its name, and its argument names (thus implicitly the number of arguments the
+ * function takes). *)
+type proto =
+  | Prototype of string * string array
+  | BinOpPrototype of string * string array * int
+
+(* func - This type represents a function definition itself. *)
+type func = Function of proto * expr
+```
+
+`parser.ml`
+
+```ocaml
+(*===---------------------------------------------------------------------===
+ * Parser
+ *===---------------------------------------------------------------------===*)
+
+(* binop_precedence - This holds the precedence for each binary operator that is
+ * defined *)
+let binop_precedence:(char, int) Hashtbl.t = Hashtbl.create 10
+
+(* precedence - Get the precedence of the pending binary operator token. *)
+let precedence c = try Hashtbl.find binop_precedence c with Not_found -> -1
+
+(* primary
+ *   ::= identifier
+ *   ::= numberexpr
+ *   ::= parenexpr
+ *   ::= ifexpr
+ *   ::= forexpr *)
+let rec parse_primary = parser
+  (* numberexpr ::= number *)
+  | [< 'Token.Number n >] -> Ast.Number n
+
+  (* parenexpr ::= '(' expression ')' *)
+  | [< 'Token.Kwd '('; e=parse_expr; 'Token.Kwd ')' ?? "expected ')'" >] -> e
+
+  (* identifierexpr
+   *   ::= identifier
+   *   ::= identifier '(' argumentexpr ')' *)
+  | [< 'Token.Ident id; stream >] ->
+      let rec parse_args accumulator = parser
+        | [< e=parse_expr; stream >] ->
+            begin parser
+              | [< 'Token.Kwd ','; e=parse_args (e :: accumulator) >] -> e
+              | [< >] -> e :: accumulator
+            end stream
+        | [< >] -> accumulator
+      in
+      let rec parse_ident id = parser
+        (* Call. *)
+        | [< 'Token.Kwd '(';
+             args=parse_args [];
+             'Token.Kwd ')' ?? "expected ')'">] ->
+            Ast.Call (id, Array.of_list (List.rev args))
+
+        (* Simple variable ref. *)
+        | [< >] -> Ast.Variable id
+      in
+      parse_ident id stream
+
+  (* ifexpr ::= 'if' expr 'then' expr 'else' expr *)
+  | [< 'Token.If; c=parse_expr;
+       'Token.Then ?? "expected 'then'"; t=parse_expr;
+       'Token.Else ?? "expected 'else'"; e=parse_expr >] ->
+      Ast.If (c, t, e)
+
+  (* forexpr
+        ::= 'for' identifier '=' expr ',' expr (',' expr)? 'in' expression *)
+  | [< 'Token.For;
+       'Token.Ident id ?? "expected identifier after for";
+       'Token.Kwd '=' ?? "expected '=' after for";
+       stream >] ->
+      begin parser
+        | [<
+             start=parse_expr;
+             'Token.Kwd ',' ?? "expected ',' after for";
+             end_=parse_expr;
+             stream >] ->
+            let step =
+              begin parser
+              | [< 'Token.Kwd ','; step=parse_expr >] -> Some step
+              | [< >] -> None
+              end stream
+            in
+            begin parser
+            | [< 'Token.In; body=parse_expr >] ->
+                Ast.For (id, start, end_, step, body)
+            | [< >] ->
+                raise (Stream.Error "expected 'in' after for")
+            end stream
+        | [< >] ->
+            raise (Stream.Error "expected '=' after for")
+      end stream
+
+  | [< >] -> raise (Stream.Error "unknown token when expecting an expression.")
+
+(* unary
+ *   ::= primary
+ *   ::= '!' unary *)
+and parse_unary = parser
+  (* If this is a unary operator, read it. *)
+  | [< 'Token.Kwd op when op != '(' && op != ')'; operand=parse_expr >] ->
+      Ast.Unary (op, operand)
+
+  (* If the current token is not an operator, it must be a primary expr. *)
+  | [< stream >] -> parse_primary stream
+
+(* binoprhs
+ *   ::= ('+' primary)* *)
+and parse_bin_rhs expr_prec lhs stream =
+  match Stream.peek stream with
+  (* If this is a binop, find its precedence. *)
+  | Some (Token.Kwd c) when Hashtbl.mem binop_precedence c ->
+      let token_prec = precedence c in
+
+      (* If this is a binop that binds at least as tightly as the current binop,
+       * consume it, otherwise we are done. *)
+      if token_prec < expr_prec then lhs else begin
+        (* Eat the binop. *)
+        Stream.junk stream;
+
+        (* Parse the unary expression after the binary operator. *)
+        let rhs = parse_unary stream in
+
+        (* Okay, we know this is a binop. *)
+        let rhs =
+          match Stream.peek stream with
+          | Some (Token.Kwd c2) ->
+              (* If BinOp binds less tightly with rhs than the operator after
+               * rhs, let the pending operator take rhs as its lhs. *)
+              let next_prec = precedence c2 in
+              if token_prec < next_prec
+              then parse_bin_rhs (token_prec + 1) rhs stream
+              else rhs
+          | _ -> rhs
+        in
+
+        (* Merge lhs/rhs. *)
+        let lhs = Ast.Binary (c, lhs, rhs) in
+        parse_bin_rhs expr_prec lhs stream
+      end
+  | _ -> lhs
+
+(* expression
+ *   ::= primary binoprhs *)
+and parse_expr = parser
+  | [< lhs=parse_unary; stream >] -> parse_bin_rhs 0 lhs stream
+
+(* prototype
+ *   ::= id '(' id* ')'
+ *   ::= binary LETTER number? (id, id)
+ *   ::= unary LETTER number? (id) *)
+let parse_prototype =
+  let rec parse_args accumulator = parser
+    | [< 'Token.Ident id; e=parse_args (id::accumulator) >] -> e
+    | [< >] -> accumulator
+  in
+  let parse_operator = parser
+    | [< 'Token.Unary >] -> "unary", 1
+    | [< 'Token.Binary >] -> "binary", 2
+  in
+  let parse_binary_precedence = parser
+    | [< 'Token.Number n >] -> int_of_float n
+    | [< >] -> 30
+  in
+  parser
+  | [< 'Token.Ident id;
+       'Token.Kwd '(' ?? "expected '(' in prototype";
+       args=parse_args [];
+       'Token.Kwd ')' ?? "expected ')' in prototype" >] ->
+      (* success. *)
+      Ast.Prototype (id, Array.of_list (List.rev args))
+  | [< (prefix, kind)=parse_operator;
+       'Token.Kwd op ?? "expected an operator";
+       (* Read the precedence if present. *)
+       binary_precedence=parse_binary_precedence;
+       'Token.Kwd '(' ?? "expected '(' in prototype";
+        args=parse_args [];
+       'Token.Kwd ')' ?? "expected ')' in prototype" >] ->
+      let name = prefix ^ (String.make 1 op) in
+      let args = Array.of_list (List.rev args) in
+
+      (* Verify right number of arguments for operator. *)
+      if Array.length args != kind
+      then raise (Stream.Error "invalid number of operands for operator")
+      else
+        if kind == 1 then
+          Ast.Prototype (name, args)
+        else
+          Ast.BinOpPrototype (name, args, binary_precedence)
+  | [< >] ->
+      raise (Stream.Error "expected function name in prototype")
+
+(* definition ::= 'def' prototype expression *)
+let parse_definition = parser
+  | [< 'Token.Def; p=parse_prototype; e=parse_expr >] ->
+      Ast.Function (p, e)
+
+(* toplevelexpr ::= expression *)
+let parse_toplevel = parser
+  | [< e=parse_expr >] ->
+      (* Make an anonymous proto. *)
+      Ast.Function (Ast.Prototype ("", [||]), e)
+
+(*  external ::= 'extern' prototype *)
+let parse_extern = parser
+  | [< 'Token.Extern; e=parse_prototype >] -> e
+```
+
+`codegen.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Code Generation
+ *===----------------------------------------------------------------------===*)
+
+open Llvm
+
+exception Error of string
+
+let context = global_context ()
+let the_module = create_module context "my cool jit"
+let builder = builder context
+let named_values:(string, llvalue) Hashtbl.t = Hashtbl.create 10
+let double_type = double_type context
+
+let rec codegen_expr = function
+  | Ast.Number n -> const_float double_type n
+  | Ast.Variable name ->
+      (try Hashtbl.find named_values name with
+        | Not_found -> raise (Error "unknown variable name"))
+  | Ast.Unary (op, operand) ->
+      let operand = codegen_expr operand in
+      let callee = "unary" ^ (String.make 1 op) in
+      let callee =
+        match lookup_function callee the_module with
+        | Some callee -> callee
+        | None -> raise (Error "unknown unary operator")
+      in
+      build_call callee [|operand|] "unop" builder
+  | Ast.Binary (op, lhs, rhs) ->
+      let lhs_val = codegen_expr lhs in
+      let rhs_val = codegen_expr rhs in
+      begin
+        match op with
+        | '+' -> build_add lhs_val rhs_val "addtmp" builder
+        | '-' -> build_sub lhs_val rhs_val "subtmp" builder
+        | '*' -> build_mul lhs_val rhs_val "multmp" builder
+        | '<' ->
+            (* Convert bool 0/1 to double 0.0 or 1.0 *)
+            let i = build_fcmp Fcmp.Ult lhs_val rhs_val "cmptmp" builder in
+            build_uitofp i double_type "booltmp" builder
+        | _ ->
+            (* If it wasn't a builtin binary operator, it must be a user defined
+             * one. Emit a call to it. *)
+            let callee = "binary" ^ (String.make 1 op) in
+            let callee =
+              match lookup_function callee the_module with
+              | Some callee -> callee
+              | None -> raise (Error "binary operator not found!")
+            in
+            build_call callee [|lhs_val; rhs_val|] "binop" builder
+      end
+  | Ast.Call (callee, args) ->
+      (* Look up the name in the module table. *)
+      let callee =
+        match lookup_function callee the_module with
+        | Some callee -> callee
+        | None -> raise (Error "unknown function referenced")
+      in
+      let params = params callee in
+
+      (* If argument mismatch error. *)
+      if Array.length params == Array.length args then () else
+        raise (Error "incorrect # arguments passed");
+      let args = Array.map codegen_expr args in
+      build_call callee args "calltmp" builder
+  | Ast.If (cond, then_, else_) ->
+      let cond = codegen_expr cond in
+
+      (* Convert condition to a bool by comparing equal to 0.0 *)
+      let zero = const_float double_type 0.0 in
+      let cond_val = build_fcmp Fcmp.One cond zero "ifcond" builder in
+
+      (* Grab the first block so that we might later add the conditional branch
+       * to it at the end of the function. *)
+      let start_bb = insertion_block builder in
+      let the_function = block_parent start_bb in
+
+      let then_bb = append_block context "then" the_function in
+
+      (* Emit 'then' value. *)
+      position_at_end then_bb builder;
+      let then_val = codegen_expr then_ in
+
+      (* Codegen of 'then' can change the current block, update then_bb for the
+       * phi. We create a new name because one is used for the phi node, and the
+       * other is used for the conditional branch. *)
+      let new_then_bb = insertion_block builder in
+
+      (* Emit 'else' value. *)
+      let else_bb = append_block context "else" the_function in
+      position_at_end else_bb builder;
+      let else_val = codegen_expr else_ in
+
+      (* Codegen of 'else' can change the current block, update else_bb for the
+       * phi. *)
+      let new_else_bb = insertion_block builder in
+
+      (* Emit merge block. *)
+      let merge_bb = append_block context "ifcont" the_function in
+      position_at_end merge_bb builder;
+      let incoming = [(then_val, new_then_bb); (else_val, new_else_bb)] in
+      let phi = build_phi incoming "iftmp" builder in
+
+      (* Return to the start block to add the conditional branch. *)
+      position_at_end start_bb builder;
+      ignore (build_cond_br cond_val then_bb else_bb builder);
+
+      (* Set a unconditional branch at the end of the 'then' block and the
+       * 'else' block to the 'merge' block. *)
+      position_at_end new_then_bb builder; ignore (build_br merge_bb builder);
+      position_at_end new_else_bb builder; ignore (build_br merge_bb builder);
+
+      (* Finally, set the builder to the end of the merge block. *)
+      position_at_end merge_bb builder;
+
+      phi
+  | Ast.For (var_name, start, end_, step, body) ->
+      (* Emit the start code first, without 'variable' in scope. *)
+      let start_val = codegen_expr start in
+
+      (* Make the new basic block for the loop header, inserting after current
+       * block. *)
+      let preheader_bb = insertion_block builder in
+      let the_function = block_parent preheader_bb in
+      let loop_bb = append_block context "loop" the_function in
+
+      (* Insert an explicit fall through from the current block to the
+       * loop_bb. *)
+      ignore (build_br loop_bb builder);
+
+      (* Start insertion in loop_bb. *)
+      position_at_end loop_bb builder;
+
+      (* Start the PHI node with an entry for start. *)
+      let variable = build_phi [(start_val, preheader_bb)] var_name builder in
+
+      (* Within the loop, the variable is defined equal to the PHI node. If it
+       * shadows an existing variable, we have to restore it, so save it
+       * now. *)
+      let old_val =
+        try Some (Hashtbl.find named_values var_name) with Not_found -> None
+      in
+      Hashtbl.add named_values var_name variable;
+
+      (* Emit the body of the loop.  This, like any other expr, can change the
+       * current BB.  Note that we ignore the value computed by the body, but
+       * don't allow an error *)
+      ignore (codegen_expr body);
+
+      (* Emit the step value. *)
+      let step_val =
+        match step with
+        | Some step -> codegen_expr step
+        (* If not specified, use 1.0. *)
+        | None -> const_float double_type 1.0
+      in
+
+      let next_var = build_add variable step_val "nextvar" builder in
+
+      (* Compute the end condition. *)
+      let end_cond = codegen_expr end_ in
+
+      (* Convert condition to a bool by comparing equal to 0.0. *)
+      let zero = const_float double_type 0.0 in
+      let end_cond = build_fcmp Fcmp.One end_cond zero "loopcond" builder in
+
+      (* Create the "after loop" block and insert it. *)
+      let loop_end_bb = insertion_block builder in
+      let after_bb = append_block context "afterloop" the_function in
+
+      (* Insert the conditional branch into the end of loop_end_bb. *)
+      ignore (build_cond_br end_cond loop_bb after_bb builder);
+
+      (* Any new code will be inserted in after_bb. *)
+      position_at_end after_bb builder;
+
+      (* Add a new entry to the PHI node for the backedge. *)
+      add_incoming (next_var, loop_end_bb) variable;
+
+      (* Restore the unshadowed variable. *)
+      begin match old_val with
+      | Some old_val -> Hashtbl.add named_values var_name old_val
+      | None -> ()
+      end;
+
+      (* for expr always returns 0.0. *)
+      const_null double_type
+
+let codegen_proto = function
+  | Ast.Prototype (name, args) | Ast.BinOpPrototype (name, args, _) ->
+      (* Make the function type: double(double,double) etc. *)
+      let doubles = Array.make (Array.length args) double_type in
+      let ft = function_type double_type doubles in
+      let f =
+        match lookup_function name the_module with
+        | None -> declare_function name ft the_module
+
+        (* If 'f' conflicted, there was already something named 'name'. If it
+         * has a body, don't allow redefinition or reextern. *)
+        | Some f ->
+            (* If 'f' already has a body, reject this. *)
+            if block_begin f <> At_end f then
+              raise (Error "redefinition of function");
+
+            (* If 'f' took a different number of arguments, reject. *)
+            if element_type (type_of f) <> ft then
+              raise (Error "redefinition of function with different # args");
+            f
+      in
+
+      (* Set names for all arguments. *)
+      Array.iteri (fun i a ->
+        let n = args.(i) in
+        set_value_name n a;
+        Hashtbl.add named_values n a;
+      ) (params f);
+      f
+
+let codegen_func the_fpm = function
+  | Ast.Function (proto, body) ->
+      Hashtbl.clear named_values;
+      let the_function = codegen_proto proto in
+
+      (* If this is an operator, install it. *)
+      begin match proto with
+      | Ast.BinOpPrototype (name, args, prec) ->
+          let op = name.[String.length name - 1] in
+          Hashtbl.add Parser.binop_precedence op prec;
+      | _ -> ()
+      end;
+
+      (* Create a new basic block to start insertion into. *)
+      let bb = append_block context "entry" the_function in
+      position_at_end bb builder;
+
+      try
+        let ret_val = codegen_expr body in
+
+        (* Finish off the function. *)
+        let _ = build_ret ret_val builder in
+
+        (* Validate the generated code, checking for consistency. *)
+        Llvm_analysis.assert_valid_function the_function;
+
+        (* Optimize the function. *)
+        let _ = PassManager.run_function the_function the_fpm in
+
+        the_function
+      with e ->
+        delete_function the_function;
+        raise e
+```
+
+`toplevel.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Top-Level parsing and JIT Driver
+ *===----------------------------------------------------------------------===*)
+
+open Llvm
+open Llvm_executionengine
+
+(* top ::= definition | external | expression | ';' *)
+let rec main_loop the_fpm the_execution_engine stream =
+  match Stream.peek stream with
+  | None -> ()
+
+  (* ignore top-level semicolons. *)
+  | Some (Token.Kwd ';') ->
+      Stream.junk stream;
+      main_loop the_fpm the_execution_engine stream
+
+  | Some token ->
+      begin
+        try match token with
+        | Token.Def ->
+            let e = Parser.parse_definition stream in
+            print_endline "parsed a function definition.";
+            dump_value (Codegen.codegen_func the_fpm e);
+        | Token.Extern ->
+            let e = Parser.parse_extern stream in
+            print_endline "parsed an extern.";
+            dump_value (Codegen.codegen_proto e);
+        | _ ->
+            (* Evaluate a top-level expression into an anonymous function. *)
+            let e = Parser.parse_toplevel stream in
+            print_endline "parsed a top-level expr";
+            let the_function = Codegen.codegen_func the_fpm e in
+            dump_value the_function;
+
+            (* JIT the function, returning a function pointer. *)
+            let result = ExecutionEngine.run_function the_function [||]
+              the_execution_engine in
+
+            print_string "Evaluated to ";
+            print_float (GenericValue.as_float Codegen.double_type result);
+            print_newline ();
+        with Stream.Error s | Codegen.Error s ->
+          (* Skip token for error recovery. *)
+          Stream.junk stream;
+          print_endline s;
+      end;
+      print_string "ready> "; flush stdout;
+      main_loop the_fpm the_execution_engine stream
+```
+
+`toy.ml`
+
+```ocaml
+(*===----------------------------------------------------------------------===
+ * Main driver code.
+ *===----------------------------------------------------------------------===*)
+
+open Llvm
+open Llvm_executionengine
+open Llvm_target
+open Llvm_scalar_opts
+
+let main () =
+  ignore (initialize_native_target ());
+
+  (* Install standard binary operators.
+   * 1 is the lowest precedence. *)
+  Hashtbl.add Parser.binop_precedence '<' 10;
+  Hashtbl.add Parser.binop_precedence '+' 20;
+  Hashtbl.add Parser.binop_precedence '-' 20;
+  Hashtbl.add Parser.binop_precedence '*' 40;    (* highest. *)
+
+  (* Prime the first token. *)
+  print_string "ready> "; flush stdout;
+  let stream = Lexer.lex (Stream.of_channel stdin) in
+
+  (* Create the JIT. *)
+  let the_execution_engine = ExecutionEngine.create Codegen.the_module in
+  let the_fpm = PassManager.create_function Codegen.the_module in
+
+  (* Set up the optimizer pipeline.  Start with registering info about how the
+   * target lays out data structures. *)
+  DataLayout.add (ExecutionEngine.target_data the_execution_engine) the_fpm;
+
+  (* Do simple "peephole" optimizations and bit-twiddling optzn. *)
+  add_instruction_combination the_fpm;
+
+  (* reassociate expressions. *)
+  add_reassociation the_fpm;
+
+  (* Eliminate Common SubExpressions. *)
+  add_gvn the_fpm;
+
+  (* Simplify the control flow graph (deleting unreachable blocks, etc). *)
+  add_cfg_simplification the_fpm;
+
+  ignore (PassManager.initialize the_fpm);
+
+  (* Run the main "interpreter loop" now. *)
+  Toplevel.main_loop the_fpm the_execution_engine stream;
+
+  (* Print out all the generated code. *)
+  dump_module Codegen.the_module
+;;
+```
+
+```cpp
+#include <stdio.h>
+
+/* putchard - putchar that takes a double and returns 0. */
+extern double putchard(double X) {
+  putchar((char)X);
+  return 0;
+}
+
+/* printd - printf that takes a double prints it as "%f\n", returning 0. */
+extern double printd(double X) {
+  printf("%f\n", X);
+  return 0;
+}
+```
