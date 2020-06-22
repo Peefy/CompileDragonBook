@@ -1609,7 +1609,7 @@ let main () =
 
 这将创建一个抽象的“执行引擎”，该引擎可以是JIT编译器或LLVM解释器。如果“的平台可用，LLVM会自动为“选择一个JIT编译器，否则它将退回到解释器。
 
-一旦Llvm_executionengine.ExecutionEngine.t被创建时，JIT是随时可以使用。有许多有用的API，但最简单的是“ Llvm_executionengine.ExecutionEngine.run_function”功能。该方法JIT编译指定的LLVM Function并返回指向生成的机器代码的函数指针。在下个例子中，这意味着可以将解析顶级表达式的代码更改为如下所示：
+一旦Llvm_executionengine.ExecutionEngine.t被创建时，JIT是随时可以使用。有许多有用的API，但最简单的是“Llvm_executionengine.ExecutionEngine.run_function”功能。该方法JIT编译指定的LLVM Function并返回指向生成的机器代码的函数指针。在下个例子中，这意味着可以将解析顶级表达式的代码更改为如下所示：
 
 ```ocaml
 (* Evaluate a top-level expression into an anonymous function. *)
@@ -1700,7 +1700,7 @@ double putchard(double X) {
 }
 ```
 
-可以使用“ ”之类的东西向控制台产生简单的输出，在控制台上打印一个小写的“ x”（120是“ x”的ASCII代码）。类似的代码可用于实现文件I / O，控制台输入和语言中的许多其他功能。extern putchard(x); putchard(120);
+可以使用“”之类的东西向控制台产生简单的输出，在控制台上打印一个小写的“x”（120是“x”的ASCII代码）。类似的代码可用于实现文件I / O，控制台输入和语言中的许多其他功能。extern putchard(x); putchard(120);
 
 #### 完整的代码清单
 
@@ -2487,7 +2487,7 @@ ignore (build_cond_br end_cond loop_bb after_bb builder);
 position_at_end after_bb builder;
 ```
 
-完成循环主体的代码后，只需要完成其控制流程即可。此代码记住结束块（用于phi节点），然后为循环出口（“afterloop”）创建块。基于退出条件的值，它创建一个条件分支，该分支在再次执行循环和退出循环之间进行选择。任何将来的代码都会在“ afterloop”块中发出，因此它将为其设置插入位置。
+完成循环主体的代码后，只需要完成其控制流程即可。此代码记住结束块（用于phi节点），然后为循环出口（“afterloop”）创建块。基于退出条件的值，它创建一个条件分支，该分支在再次执行循环和退出循环之间进行选择。任何将来的代码都会在“afterloop”块中发出，因此它将为其设置插入位置。
 
 ```ocaml
 (* Add a new entry to the PHI node for the backedge. *)
@@ -4147,3 +4147,47 @@ extern double printd(double X) {
   return 0;
 }
 ```
+
+### 扩展语言：可变变量
+
+可变变量会导致SSA构造复杂
+
+```cpp
+int G, H;
+int test(_Bool Condition) {
+  int X;
+  if (Condition)
+    X = G;
+  else
+    X = H;
+  return X;
+}
+```
+
+在这种情况下，有变量“X”，其值取决于程序中执行的路径。因为在返回指令之前X可能有两个不同的值，所以将插入PHI节点以合并这两个值。对于此示例，想要的LLVM IR如下所示：
+
+```llvm
+@G = weak global i32 0   ; type of @G is i32*
+@H = weak global i32 0   ; type of @H is i32*
+
+define i32 @test(i1 %Condition) {
+entry:
+  br i1 %Condition, label %cond_true, label %cond_false
+
+cond_true:
+  %X.0 = load i32* @G
+  br label %cond_next
+
+cond_false:
+  %X.1 = load i32* @H
+  br label %cond_next
+
+cond_next:
+  %X.2 = phi i32 [ %X.1, %cond_false ], [ %X.0, %cond_true ]
+  ret i32 %X.2
+}
+```
+
+在此示例中，G和H全局变量的负载在LLVM IR中是显式的，并且它们位于if语句（cond_true / cond_false）的then / else分支中。为了合并输入值，cond_next块中的X.2 phi节点根据控制流的来源来选择正确的值：如果控制流来自cond_false块，则X.2获得X的值.1。或者，如果控制流来自cond_true，则它将获得X.0的值。
+
+#### LLVM内存
