@@ -1627,7 +1627,7 @@ print_float (GenericValue.as_float Codegen.double_type result);
 print_newline ();
 ```
 
-将顶级表达式编译成一个自包含的LLVM函数，该函数不带任何参数并返回计算出的double。因为LLVM JIT编译器与本机平台ABI相匹配，所以这意味着您可以将结果指针转换为该类型的函数指针并直接调用它。这意味着，JIT编译代码和静态链接到您的应用程序的本机代码之间没有区别。
+将顶级表达式编译成一个自包含的LLVM函数，该函数不带任何参数并返回计算出的double。因为LLVM JIT编译器与本机平台ABI相匹配，所以这意味着可以将结果指针转换为该类型的函数指针并直接调用它。这意味着，JIT编译代码和静态链接到的应用程序的本机代码之间没有区别。
 
 ```ocaml
 ready> 4+5;
@@ -1689,7 +1689,7 @@ ready> foo(4.0);
 Evaluated to 1.000000
 ```
 
-LLVM JIT提供了许多接口（在llvm_executionengine.mli文件中查找 ），用于控制如何解析未知函数。它允许您在IR对象和地址之间建立显式映射（例如，对于要映射到静态表的LLVM全局变量很有用），可以基于函数名称动态地动态确定，甚至可以第一次调用时，懒惰地拥有JIT编译功能。
+LLVM JIT提供了许多接口（在llvm_executionengine.mli文件中查找 ），用于控制如何解析未知函数。它允许在IR对象和地址之间建立显式映射（例如，对于要映射到静态表的LLVM全局变量很有用），可以基于函数名称动态地动态确定，甚至可以第一次调用时，懒惰地拥有JIT编译功能。
 
 ```ocaml
 /* putchard - putchar that takes a double and returns 0. */
@@ -4191,3 +4191,289 @@ cond_next:
 在此示例中，G和H全局变量的负载在LLVM IR中是显式的，并且它们位于if语句（cond_true / cond_false）的then / else分支中。为了合并输入值，cond_next块中的X.2 phi节点根据控制流的来源来选择正确的值：如果控制流来自cond_false块，则X.2获得X的值.1。或者，如果控制流来自cond_true，则它将获得X.0的值。
 
 #### LLVM内存
+
+尽管LLVM确实要求所有寄存器值都采用SSA形式，但它并不需要（或允许）存储对象采用SSA形式。在上面的示例中，请注意，来自G和H的负载是对G和H的直接访问：它们没有重命名或版本化。这与其他一些尝试对内存对象进行版本控制的编译器系统不同。在LLVM中，不是将内存的数据流分析编码为LLVM IR，而是使用按需计算的分析通过来处理。
+
+在LLVM中，所有内存访问都通过加载/存储指令进行了明确显示，并且经过精心设计，使其不具有（或不需要）“address-of”运算符。
+
+注意，即使变量定义为“ i32”，@ G / @ H全局变量的类型实际上还是“ i32 *”。这意味着@G 为全局数据区域中的i32 定义了空间，但其 名称实际上是指该空间的地址。堆栈变量的工作方式相同，不同之处在于它们不是使用全局变量定义声明，而是使用LLVM alloca指令声明：
+
+```llvm
+define i32 @example() {
+entry:
+  %X = alloca i32           ; type of %X is i32*.
+  ...
+  %tmp = load i32* %X       ; load the stack value %X from the stack.
+  %tmp2 = add i32 %tmp, 1   ; increment it
+  store i32 %tmp2, i32* %X  ; store it back
+  ...
+```
+
+此代码显示了如何在LLVM IR中声明和操作堆栈变量的示例。用alloca指令分配的堆栈内存是完全通用的：可以将堆栈插槽的地址传递给函数，可以将其存储在其他变量中，等等。
+
+```llvm
+@G = weak global i32 0   ; type of @G is i32*
+@H = weak global i32 0   ; type of @H is i32*
+
+define i32 @test(i1 %Condition) {
+entry:
+  %X = alloca i32           ; type of %X is i32*.
+  br i1 %Condition, label %cond_true, label %cond_false
+
+cond_true:
+  %X.0 = load i32* @G
+        store i32 %X.0, i32* %X   ; Update X
+  br label %cond_next
+
+cond_false:
+  %X.1 = load i32* @H
+        store i32 %X.1, i32* %X   ; Update X
+  br label %cond_next
+
+cond_next:
+  %X.2 = load i32* %X       ; Read X
+  ret i32 %X.2
+}
+```
+
+发现了一种无需创建任何Phi节点即可处理任意可变变量的方法：
+
+* 每个可变变量成为堆栈分配。
+* 每次读取变量都会成为堆栈的负载。
+* 变量的每次更新都将存储到堆栈中。
+* 取得变量的地址仅直接使用堆栈地址。
+
+尽管此解决方案解决了迫在眉睫的问题，但它引入了另一个解决方案：现在显然已经为非常简单和常见的操作引入了很多堆栈流量，这是一个主要的性能问题。对来说幸运的是，LLVM优化器具有一个名为“ mem2reg”的高度优化的优化通道，可以处理这种情况，将这样的分配提升到SSA寄存器中，并在适当时插入Phi节点。例如，如果通过传递运行此示例，则将获得：
+
+```llvm
+$ llvm-as < example.ll | opt -mem2reg | llvm-dis
+@G = weak global i32 0
+@H = weak global i32 0
+
+define i32 @test(i1 %Condition) {
+entry:
+  br i1 %Condition, label %cond_true, label %cond_false
+
+cond_true:
+  %X.0 = load i32* @G
+  br label %cond_next
+
+cond_false:
+  %X.1 = load i32* @H
+  br label %cond_next
+
+cond_next:
+  %X.01 = phi i32 [ %X.1, %cond_false ], [ %X.0, %cond_true ]
+  ret i32 %X.01
+}
+```
+
+mem2reg通道实现了用于构造SSA表单的标准“迭代优势边界”算法，并具有许多优化措施，可加速（非常常见）简并案例。mem2reg优化过程是处理可变变量的答案，强烈建议依赖它。请注意，mem2reg仅在某些情况下适用于变量：
+
+* mem2reg是由alloca驱动的：它查找alloca，并且如果可以处理它们，则将其升级。它不适用于全局变量或堆分配。
+* mem2reg仅在函数的入口块中查找alloca指令。在入口块中保证了alloca仅执行一次，这使分析更加简单。
+* mem2reg仅促进使用直接加载和存储的alloca。如果将堆栈对象的地址传递给函数，或者涉及任何有趣的指针算法，则不会提升alloca。
+* mem2reg仅适用于第一类值的分配（例如指针，标量和向量），并且仅当分配的数组大小为1（或.ll文件中缺少）时才起作用。mem2reg无法将结构或数组提升为寄存器。请注意，“ sroa”传递更强大，并且在许多情况下可以提升结构，“联合”和数组。
+
+对于大多数命令式语言来说，所有这些属性都很容易满足，将在下面用万花筒对此进行说明。您可能要问的最后一个问题是：我是否应该为我的前端烦恼呢？如果我直接进行SSA构造，避免使用mem2reg优化通道，那会更好吗？简而言之，强烈建议您使用此技术来构建SSA表单，除非有非常充分的理由不这样做。使用这种技术是：
+
+* 经验证且经过良好测试：clang使用此技术处理局部可变变量。因此，LLVM的最常见客户端正在使用它来处理大量变量。您可以确定可以早日发现并修复错误。
+* 极快：mem2reg具有许多特殊情况，因此在普通情况下以及在一般情况下都可以使其快速。例如，它具有仅在单个块中使用的变量的快速路径，仅具有一个分配点的变量，避免插入不需要的phi节点的良好启发法等。
+* 生成调试信息所需：LLVM中的调试信息依赖于公开变量的地址，以便可以将调试信息附加到该变量。这种技术与这种调试信息风格非常自然地吻合。
+
+#### 语言中的可变变量
+
+虽然第一项实际上就是它的意义，但是只有传入参数和归纳变量的变量，并且重新定义它们的范围很广：)。同样，定义新变量的功能是有用的，无论您是否要对其进行突变。这是一个激励性的示例，展示了如何使用它们：
+
+```llvm
+# Define ':' for sequencing: as a low-precedence operator that ignores operands
+# and just returns the RHS.
+def binary : 1 (x y) y;
+
+# Recursive fib, we could do this before.
+def fib(x)
+  if (x < 3) then
+    1
+  else
+    fib(x-1)+fib(x-2);
+
+# Iterative fib.
+def fibi(x)
+  var a = 1, b = 1, c in
+  (for i = 3, i < x in
+     c = a + b :
+     a = b :
+     b = c) :
+  b;
+
+# Call it.
+fibi(10);
+```
+
+#### 新的赋值运算符
+
+在当前的框架下，添加新的赋值运算符非常简单。将像解析任何其他二进制运算符一样解析它，但是在内部对其进行处理（而不是允许用户定义它）。第一步是设置优先级：
+
+```ocaml
+let main () =
+  (* Install standard binary operators.
+   * 1 is the lowest precedence. *)
+  Hashtbl.add Parser.binop_precedence '=' 2;
+  Hashtbl.add Parser.binop_precedence '<' 10;
+  Hashtbl.add Parser.binop_precedence '+' 20;
+  Hashtbl.add Parser.binop_precedence '-' 20;
+  ...
+```
+
+既然解析器知道二进制运算符的优先级，那么它将处理所有解析和AST生成。只需要为赋值运算符实现codegen。看起来像：
+
+```ocaml
+let rec codegen_expr = function
+      begin match op with
+      | '=' ->
+          (* Special case '=' because we don't want to emit the LHS as an
+           * expression. *)
+          let name =
+            match lhs with
+            | Ast.Variable name -> name
+            | _ -> raise (Error "destination of '=' must be a variable")
+          in
+```
+
+一旦有了变量，就可以对分配进行代码生成，方法很简单：发出分配的RHS，创建存储，然后返回计算出的值。返回一个值可进行链式分配，例如“ X =（Y = Z）”。
+
+既然有了赋值运算符，就可以对循环变量和参数进行突变。例如，现在可以运行如下代码：
+
+```ocaml
+# Function to print a double.
+extern printd(x);
+
+# Define ':' for sequencing: as a low-precedence operator that ignores operands
+# and just returns the RHS.
+def binary : 1 (x y) y;
+
+def test(x)
+  printd(x) :
+  x = 4 :
+  printd(x);
+
+test(123);
+```
+
+#### 用户定义的局部变量
+
+```ocaml
+type token =
+  ...
+  (* var definition *)
+  | Var
+
+...
+
+and lex_ident buffer = parser
+      ...
+      | "in" -> [< 'Token.In; stream >]
+      | "binary" -> [< 'Token.Binary; stream >]
+      | "unary" -> [< 'Token.Unary; stream >]
+      | "var" -> [< 'Token.Var; stream >]
+      ...
+```
+
+下一步是定义将构建的AST节点。对于var/in，它看起来像这样：
+
+```ocaml
+type expr =
+  ...
+  (* variant for var/in. *)
+  | Var of (string * expr option) array * expr
+  ...
+```
+
+var/in允许一次定义一个名称列表，并且每个名称都可以有一个初始化值。因此，在VarNames向量中捕获了此信息。另外，var/in有一个主体，允许该主体访问var/in定义的变量。
+
+有了这个，可以定义解析器片段。要做的第一件事是将其添加为主表达式：
+
+```ocaml
+(* primary
+ *   ::= identifier
+ *   ::= numberexpr
+ *   ::= parenexpr
+ *   ::= ifexpr
+ *   ::= forexpr
+ *   ::= varexpr *)
+let rec parse_primary = parser
+  ...
+  (* varexpr
+   *   ::= 'var' identifier ('=' expression?
+   *             (',' identifier ('=' expression)?)* 'in' expression *)
+  | [< 'Token.Var;
+       (* At least one variable name is required. *)
+       'Token.Ident id ?? "expected identifier after var";
+       init=parse_var_init;
+       var_names=parse_var_names [(id, init)];
+       (* At this point, we have to have 'in'. *)
+       'Token.In ?? "expected 'in' keyword after 'var'";
+       body=parse_expr >] ->
+      Ast.Var (Array.of_list (List.rev var_names), body)
+
+...
+
+and parse_var_init = parser
+  (* read in the optional initializer. *)
+  | [< 'Token.Kwd '='; e=parse_expr >] -> Some e
+  | [< >] -> None
+
+and parse_var_names accumulator = parser
+  | [< 'Token.Kwd ',';
+       'Token.Ident id ?? "expected identifier list after var";
+       init=parse_var_init;
+       e=parse_var_names ((id, init) :: accumulator) >] -> e
+  | [< >] -> accumulator
+```
+
+```ocaml
+let rec codegen_expr = function
+  ...
+  | Ast.Var (var_names, body)
+      let old_bindings = ref [] in
+
+      let the_function = block_parent (insertion_block builder) in
+
+      (* Register all variables and emit their initializer. *)
+      Array.iter (fun (var_name, init) ->
+```
+
+基本上，它遍历所有变量，一次安装一个。对于放入符号表中的每个变量，都记得在OldBindings中替换的先前值。
+
+```ocaml
+ (* Emit the initializer before adding the variable to scope, this
+   * prevents the initializer from referencing the variable itself, and
+   * permits stuff like this:
+   *   var a = 1 in
+   *     var a = a in ...   # refers to outer 'a'. *)
+  let init_val =
+    match init with
+    | Some init -> codegen_expr init
+    (* If not specified, use 0.0. *)
+    | None -> const_float double_type 0.0
+  in
+
+  let alloca = create_entry_block_alloca the_function var_name in
+  ignore(build_store init_val alloca builder);
+
+  (* Remember the old variable binding so that we can restore the binding
+   * when we unrecurse. *)
+
+  begin
+    try
+      let old_value = Hashtbl.find named_values var_name in
+      old_bindings := (var_name, old_value) :: !old_bindings;
+    with Not_found > ()
+  end;
+
+  (* Remember this binding. *)
+  Hashtbl.add named_values var_name alloca;
+) var_names;
+```
+
+
