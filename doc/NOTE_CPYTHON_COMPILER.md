@@ -361,6 +361,223 @@ extern void PyTokenizer_Free(struct tok_state *);
 extern int PyTokenizer_Get(struct tok_state *, const char **, const char **);
 ```
 
+```cpp
+/* Create and initialize a new tok_state structure 
+创建并初始化新的tok_state结构 */
+static struct tok_state *
+tok_new(void)
+{
+    struct tok_state *tok = (struct tok_state *)PyMem_MALLOC(
+                                            sizeof(struct tok_state));
+    if (tok == NULL)
+        return NULL;
+    tok->buf = tok->cur = tok->inp = NULL;
+    tok->start = NULL;
+    tok->end = NULL;
+    tok->done = E_OK;
+    tok->fp = NULL;
+    tok->input = NULL;
+    tok->tabsize = TABSIZE;
+    tok->indent = 0;
+    tok->indstack[0] = 0;
+
+    tok->atbol = 1;
+    tok->pendin = 0;
+    tok->prompt = tok->nextprompt = NULL;
+    tok->lineno = 0;
+    tok->level = 0;
+    tok->altindstack[0] = 0;
+    tok->decoding_state = STATE_INIT;
+    tok->decoding_erred = 0;
+    tok->read_coding_spec = 0;
+    tok->enc = NULL;
+    tok->encoding = NULL;
+    tok->cont_line = 0;
+    tok->filename = NULL;
+    tok->decoding_readline = NULL;
+    tok->decoding_buffer = NULL;
+    tok->type_comments = 0;
+
+    tok->async_hacks = 0;
+    tok->async_def = 0;
+    tok->async_def_indent = 0;
+    tok->async_def_nl = 0;
+
+    return tok;
+}
+```
+
+`PyMem_MALLOC`是Python内存分配的接口，
+
+```cpp
+/* Read a line of text from TOK into S, using the stream in TOK.
+   Return NULL on failure, else S.
+
+   On entry, tok->decoding_buffer will be one of:
+     1) NULL: need to call tok->decoding_readline to get a new line
+     2) PyUnicodeObject *: decoding_feof has called tok->decoding_readline and
+       stored the result in tok->decoding_buffer
+     3) PyByteArrayObject *: previous call to fp_readl did not have enough room
+       (in the s buffer) to copy entire contents of the line read
+       by tok->decoding_readline.  tok->decoding_buffer has the overflow.
+       In this case, fp_readl is called in a loop (with an expanded buffer)
+       until the buffer ends with a '\n' (or until the end of the file is
+       reached): see tok_nextc and its calls to decoding_fgets.
+*/
+
+/*
+使用TOK中的流将一行文本从TOK读入S。
+    失败时返回NULL，否则返回S。
+
+    进入时，tok-> decoding_buffer将是以下之一：
+      1）NULL：需要调用tok-> decoding_readline以获取新行
+      2）PyUnicodeObject *：decode_feof调用了tok-> decoding_readline和
+        将结果存储在tok-> decoding_buffer中
+      3）PyByteArrayObject *：先前对fp_readl的调用没有足够的空间
+        （在s缓冲区中）复制读取的行的全部内容
+        通过tok-> decoding_readline。 tok-> decoding_buffer溢出。
+        在这种情况下，fp_readl在循环中调用（带有扩展的缓冲区）
+        直到缓冲区以'\ n'结尾（或直到文件结尾为
+        已到达）：请参见tok_nextc及其对encoding_fgets的调用。
+*/
+
+static char *
+fp_readl(char *s, int size, struct tok_state *tok)
+{
+    PyObject* bufobj;
+    const char *buf;
+    Py_ssize_t buflen;
+
+    /* Ask for one less byte so we can terminate it */
+    assert(size > 0);
+    size--;
+
+    if (tok->decoding_buffer) {
+        bufobj = tok->decoding_buffer;
+        Py_INCREF(bufobj);
+    }
+    else
+    {
+        bufobj = _PyObject_CallNoArg(tok->decoding_readline);
+        if (bufobj == NULL)
+            goto error;
+    }
+    if (PyUnicode_CheckExact(bufobj))
+    {
+        buf = PyUnicode_AsUTF8AndSize(bufobj, &buflen);
+        if (buf == NULL) {
+            goto error;
+        }
+    }
+    else
+    {
+        buf = PyByteArray_AsString(bufobj);
+        if (buf == NULL) {
+            goto error;
+        }
+        buflen = PyByteArray_GET_SIZE(bufobj);
+    }
+
+    Py_XDECREF(tok->decoding_buffer);
+    if (buflen > size) {
+        /* Too many chars, the rest goes into tok->decoding_buffer */
+        tok->decoding_buffer = PyByteArray_FromStringAndSize(buf+size,
+                                                         buflen-size);
+        if (tok->decoding_buffer == NULL)
+            goto error;
+        buflen = size;
+    }
+    else
+        tok->decoding_buffer = NULL;
+
+    memcpy(s, buf, buflen);
+    s[buflen] = '\0';
+    if (buflen == 0) /* EOF */
+        s = NULL;
+    Py_DECREF(bufobj);
+    return s;
+
+error:
+    Py_XDECREF(bufobj);
+    return error_ret(tok);
+}
+
+/* Set the readline function for TOK to a StreamReader's
+   readline function. The StreamReader is named ENC.
+
+   This function is called from check_bom and check_coding_spec.
+
+   ENC is usually identical to the future value of tok->encoding,
+   except for the (currently unsupported) case of UTF-16.
+
+   Return 1 on success, 0 on failure. */
+
+/*
+将TOK的readline函数设置为StreamReader的
+    readline功能。 StreamReader的名称为ENC。
+
+    从check_bom和check_coding_spec调用此函数。
+
+    ENC通常与tok-> encoding的未来值相同，
+    UTF-16（目前不支持）情况除外。
+
+    成功返回1，失败返回0。
+*/
+
+static int
+fp_setreadl(struct tok_state *tok, const char* enc)
+{
+    PyObject *readline, *io, *stream;
+    _Py_IDENTIFIER(open);
+    _Py_IDENTIFIER(readline);
+    int fd;
+    long pos;
+
+    fd = fileno(tok->fp);
+    /* Due to buffering the file offset for fd can be different from the file
+     * position of tok->fp.  If tok->fp was opened in text mode on Windows,
+     * its file position counts CRLF as one char and can't be directly mapped
+     * to the file offset for fd.  Instead we step back one byte and read to
+     * the end of line.*/
+    /*由于缓冲，fd的文件偏移量可能与文件不同
+      * tok-> fp的位置。 如果在Windows上以文本模式打开了tok-> fp，
+      *它的文件位置将CRLF计为一个字符，无法直接映射
+      *到fd的文件偏移量。 相反，我们退后一个字节读取
+      *行尾*/
+    pos = ftell(tok->fp);
+    if (pos == -1 ||
+        lseek(fd, (off_t)(pos > 0 ? pos - 1 : pos), SEEK_SET) == (off_t)-1) {
+        PyErr_SetFromErrnoWithFilename(PyExc_OSError, NULL);
+        return 0;
+    }
+
+    io = PyImport_ImportModuleNoBlock("io");
+    if (io == NULL)
+        return 0;
+
+    stream = _PyObject_CallMethodId(io, &PyId_open, "isisOOO",
+                    fd, "r", -1, enc, Py_None, Py_None, Py_False);
+    Py_DECREF(io);
+    if (stream == NULL)
+        return 0;
+
+    readline = _PyObject_GetAttrId(stream, &PyId_readline);
+    Py_DECREF(stream);
+    if (readline == NULL)
+        return 0;
+    Py_XSETREF(tok->decoding_readline, readline);
+
+    if (pos > 0) {
+        PyObject *bufobj = _PyObject_CallNoArg(readline);
+        if (bufobj == NULL)
+            return 0;
+        Py_DECREF(bufobj);
+    }
+
+    return 1;
+}
+```
+
 ### CPython 语法分析器
 
 
