@@ -898,8 +898,8 @@ tok_backup(struct tok_state *tok, int c)
 ```
 
 ```cpp
-/* Get next token, after space stripping etc. */
-
+/* Get next token, after space stripping etc. 
+在剥离空格等之后获取下一个词法记号。 */
 static int
 tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
 {
@@ -911,7 +911,8 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
     tok->start = NULL;
     blankline = 0;
 
-    /* Get indentation level */
+    /* Get indentation level 
+    获取缩进级别 */
     if (tok->atbol) {
         int col = 0;
         int altcol = 0;
@@ -940,30 +941,40 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                not passed to the parser as NEWLINE tokens,
                except *totally* empty lines in interactive
                mode, which signal the end of a command group. */
+            /*仅包含空格和/或注释的行
+                和/或换行符
+                不应该影响缩进，并且
+                没有作为NEWLINE词法标记传递给解析器，
+                交互式中“完全”空行除外
+                模式，表示命令组已结束。 */
             if (col == 0 && c == '\n' && tok->prompt != NULL) {
-                blankline = 0; /* Let it through */
+                blankline = 0; /* Let it through 空行 */
             }
             else if (tok->prompt != NULL && tok->lineno == 1) {
                 /* In interactive mode, if the first line contains
                    only spaces and/or a comment, let it through. */
+                /*在交互模式下，如果第一行包含
+                    仅空格和/或注释，让它通过。 */
                 blankline = 0;
                 col = altcol = 0;
             }
             else {
-                blankline = 1; /* Ignore completely */
+                blankline = 1; /* Ignore completely 完全忽略 */
             }
             /* We can't jump back right here since we still
                may need to skip to the end of a comment */
+            /*因为我们仍然无法在此处跳回
+                可能需要跳到评论结尾*/
         }
         if (!blankline && tok->level == 0) {
             if (col == tok->indstack[tok->indent]) {
-                /* No change */
+                /* No change 没有改变 */
                 if (altcol != tok->altindstack[tok->indent]) {
                     return indenterror(tok);
                 }
             }
             else if (col > tok->indstack[tok->indent]) {
-                /* Indent -- always one */
+                /* Indent -- always one 缩进-总是一个 */
                 if (tok->indent+1 >= MAXINDENT) {
                     tok->done = E_TOODEEP;
                     tok->cur = tok->inp;
@@ -977,7 +988,7 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                 tok->altindstack[tok->indent] = altcol;
             }
             else /* col < tok->indstack[tok->indent] */ {
-                /* Dedent -- any number, must be consistent */
+                /* Dedent -- any number, must be consistent 任何数字，必须一致 */
                 while (tok->indent > 0 &&
                     col < tok->indstack[tok->indent]) {
                     tok->pendin--;
@@ -997,7 +1008,7 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
 
     tok->start = tok->cur;
 
-    /* Return pending indents/dedents */
+    /* Return pending indents/dedents 返回待定缩进/缩进 */
     if (tok->pendin != 0) {
         if (tok->pendin < 0) {
             tok->pendin++;
@@ -1009,10 +1020,11 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
         }
     }
 
-    /* Peek ahead at the next character */
+    /* Peek ahead at the next character 提前看下一个字符 */
     c = tok_nextc(tok);
     tok_backup(tok, c);
-    /* Check if we are closing an async function */
+    /* Check if we are closing an async function 
+    检查我们是否正在关闭异步功能 */
     if (tok->async_def
         && !blankline
         /* Due to some implementation artifacts of type comments,
@@ -1020,13 +1032,22 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
          * indentation level and it will produce a NEWLINE after it.
          * To avoid spuriously ending an async function due to this,
          * wait until we have some non-newline char in front of us. */
+        /*由于类型注释的一些实现工件，
+          *函数开头的TYPE_COMMENT不会设置
+          *缩进级别，它将在其后产生一个NEWLINE。
+          *为避免因此错误终止异步功能，
+          *等到我们面前出现一些非换行符。 */
         && c != '\n'
         && tok->level == 0
         /* There was a NEWLINE after ASYNC DEF,
            so we're past the signature. */
+        /* ASYNC DEF之后有一个NEWLINE，
+            所以我们过去了签名。 */
         && tok->async_def_nl
         /* Current indentation level is less than where
            the async function was defined */
+        /*当前缩进级别小于
+            异步功能已定义*/
         && tok->async_def_indent >= tok->indent)
     {
         tok->async_def = 0;
@@ -1036,15 +1057,15 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
 
  again:
     tok->start = NULL;
-    /* Skip spaces */
+    /* Skip spaces 跳过空白 */
     do {
         c = tok_nextc(tok);
     } while (c == ' ' || c == '\t' || c == '\014');
 
-    /* Set start of current token */
+    /* Set start of current token 设置当前token的开始 */
     tok->start = tok->cur - 1;
 
-    /* Skip comment, unless it's a type comment */
+    /* Skip comment, unless it's a type comment 忽略注释，除非它是一个类型注释 */
     if (c == '#') {
         const char *prefix, *p, *type_start;
 
@@ -1069,16 +1090,20 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                 prefix++;
             }
 
-            /* This is a type comment if we matched all of type_comment_prefix. */
+            /* This is a type comment if we matched all of type_comment_prefix. 
+            如果我们匹配所有type_comment_prefix，则这是一个类型注释。 */
             if (!*prefix) {
                 int is_type_ignore = 1;
                 const char *ignore_end = p + 6;
-                tok_backup(tok, c);  /* don't eat the newline or EOF */
+                tok_backup(tok, c);  /* don't eat the newline or EOF 
+                不要吃换行符或EOF */
 
                 type_start = p;
 
                 /* A TYPE_IGNORE is "type: ignore" followed by the end of the token
-                 * or anything ASCII and non-alphanumeric. */
+                 * or anything ASCII and non-alphanumeric. 
+                 * TYPE_IGNORE是“类型：忽略”，后跟词法标记的结尾
+                * 或任何ASCII和非字母数字的内容。 */
                 is_type_ignore = (
                     tok->cur >= ignore_end && memcmp(p, "ignore", 6) == 0
                     && !(tok->cur > ignore_end
@@ -1088,14 +1113,17 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                     *p_start = ignore_end;
                     *p_end = tok->cur;
 
-                    /* If this type ignore is the only thing on the line, consume the newline also. */
+                    /* If this type ignore is the only thing on the line, 
+                    consume the newline also. 
+                    如果此类型ignore是行上唯一的内容，则也使用换行符。 */
                     if (blankline) {
                         tok_nextc(tok);
                         tok->atbol = 1;
                     }
                     return TYPE_IGNORE;
                 } else {
-                    *p_start = type_start;  /* after type_comment_prefix */
+                    *p_start = type_start;  /* after type_comment_prefix 
+                    在type_comment_prefix之后 */
                     *p_end = tok->cur;
                     return TYPE_COMMENT;
                 }
@@ -1103,26 +1131,29 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
         }
     }
 
-    /* Check for EOF and errors now */
+    /* Check for EOF and errors now 检查EOF字符 */
     if (c == EOF) {
         return tok->done == E_EOF ? ENDMARKER : ERRORTOKEN;
     }
 
-    /* Identifier (most frequent token!) */
+    /* Identifier (most frequent token!) 
+    标识符（最常使用的词法标记！）*/
     nonascii = 0;
     if (is_potential_identifier_start(c)) {
-        /* Process the various legal combinations of b"", r"", u"", and f"". */
+        /* Process the various legal combinations of b"", r"", u"", and f"". 
+        处理b“”，r“”，u“”和f“”的各种字符串合法组合。 */
         int saw_b = 0, saw_r = 0, saw_u = 0, saw_f = 0;
         while (1) {
             if (!(saw_b || saw_u || saw_f) && (c == 'b' || c == 'B'))
                 saw_b = 1;
             /* Since this is a backwards compatibility support literal we don't
                want to support it in arbitrary order like byte literals. */
+            /*由于这是一个向后兼容支持文字，因此我们不希望像字节文字那样以任意顺序支持它。 */
             else if (!(saw_b || saw_u || saw_r || saw_f)
                      && (c == 'u'|| c == 'U')) {
                 saw_u = 1;
             }
-            /* ur"" and ru"" are not supported */
+            /* ur"" and ru"" are not supported ur 和 ru不支持 */
             else if (!(saw_r || saw_u) && (c == 'r' || c == 'R')) {
                 saw_r = 1;
             }
@@ -1161,8 +1192,16 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                but there's no *valid* Python 3.4 code that would be
                rejected, and async functions will be rejected in a
                later phase.) */
+        /* 可能是“异步”或“等待”词法标记。 对于Python 3.7或
+                后来我们无条件地认出了他们。 对于Python
+                3.5或3.6我们在'def'前面识别了'async'，并且
+                “异步定义”中的任意一个。 （从技术上讲，
+                在3.4或更早的版本中根本不应该识别这些，
+                但是没有*有效*的Python 3.4代码
+                被拒绝，异步功能将在
+                后期。）*/
             if (!tok->async_hacks || tok->async_def) {
-                /* Always recognize the keywords. */
+                /* Always recognize the keywords. 始终识别关键字。 */
                 if (memcmp(tok->start, "async", 5) == 0) {
                     return ASYNC;
                 }
@@ -1172,8 +1211,8 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
             }
             else if (memcmp(tok->start, "async", 5) == 0) {
                 /* The current token is 'async'.
-                   Look ahead one token to see if that is 'def'. */
-
+                   Look ahead one token to see if that is 'def'. 
+                   当前词法标记为“异步”。 提前查看一个词法标记，看看是否为“def”。 */
                 struct tok_state ahead_tok;
                 const char *ahead_tok_start = NULL;
                 const char *ahead_tok_end = NULL;
@@ -1188,7 +1227,8 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                     && memcmp(ahead_tok.start, "def", 3) == 0)
                 {
                     /* The next token is going to be 'def', so instead of
-                       returning a plain NAME token, return ASYNC. */
+                       returning a plain NAME token, return ASYNC. 
+                    下一个标记将是’def‘，因此，不返回简单的NAME标记，而是返回ASYNC。 */
                     tok->async_def_indent = tok->indent;
                     tok->async_def = 1;
                     return ASYNC;
@@ -1199,24 +1239,25 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
         return NAME;
     }
 
-    /* Newline */
+    /* Newline 换行符 */
     if (c == '\n') {
         tok->atbol = 1;
         if (blankline || tok->level > 0) {
             goto nextline;
         }
         *p_start = tok->start;
-        *p_end = tok->cur - 1; /* Leave '\n' out of the string */
+        *p_end = tok->cur - 1; /* Leave '\n' out of the string 将'\n'排除在字符串外 */
         tok->cont_line = 0;
         if (tok->async_def) {
             /* We're somewhere inside an 'async def' function, and
-               we've encountered a NEWLINE after its signature. */
+               we've encountered a NEWLINE after its signature. 
+               我们在“异步定义”函数内部，在签名后遇到了NEWLINE。 */
             tok->async_def_nl = 1;
         }
         return NEWLINE;
     }
 
-    /* Period or number starting with period? */
+    /* Period or number starting with period? 句号还是数字以句号开头？ */
     if (c == '.') {
         c = tok_nextc(tok);
         if (isdigit(c)) {
@@ -1241,16 +1282,16 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
         return DOT;
     }
 
-    /* Number */
+    /* Number 数字 */
     if (isdigit(c)) {
         if (c == '0') {
-            /* Hex, octal or binary -- maybe. */
+            /* Hex, octal or binary -- maybe. 如果是以0开头，那么有可能是一个十六进制，八进制和二进制数字 */
             c = tok_nextc(tok);
             if (c == 'x' || c == 'X') {
                 /* Hex */
                 c = tok_nextc(tok);
                 do {
-                    if (c == '_') {
+                    if (c == '_') {  /* 忽略数字中的下划线 */
                         c = tok_nextc(tok);
                     }
                     if (!isxdigit(c)) {
@@ -1263,7 +1304,7 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                 } while (c == '_');
             }
             else if (c == 'o' || c == 'O') {
-                /* Octal */
+                /* Octal 八进制 */
                 c = tok_nextc(tok);
                 do {
                     if (c == '_') {
@@ -1289,7 +1330,7 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                 }
             }
             else if (c == 'b' || c == 'B') {
-                /* Binary */
+                /* Binary 二进制数字 */
                 c = tok_nextc(tok);
                 do {
                     if (c == '_') {
@@ -1316,8 +1357,8 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
             }
             else {
                 int nonzero = 0;
-                /* maybe old-style octal; c is first char of it */
-                /* in any case, allow '0' as a literal */
+                /* maybe old-style octal; c is first char of it 也许是老式的八进制； c是它的第一个字符 */
+                /* in any case, allow '0' as a literal 在任何情况下，均允许使用“ 0”作为字面量 */
                 while (1) {
                     if (c == '_') {
                         c = tok_nextc(tok);
@@ -1340,16 +1381,16 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                 }
                 if (c == '.') {
                     c = tok_nextc(tok);
-                    goto fraction;
+                    goto fraction;  /* 分数 */
                 }
                 else if (c == 'e' || c == 'E') {
-                    goto exponent;
+                    goto exponent;  /* 指数 */
                 }
                 else if (c == 'j' || c == 'J') {
-                    goto imaginary;
+                    goto imaginary; /* 复数 */
                 }
                 else if (nonzero) {
-                    /* Old-style octal: now disallowed. */
+                    /* Old-style octal: now disallowed. 旧式八进制：现在禁止使用。 */
                     tok_backup(tok, c);
                     return syntaxerror(tok,
                                        "leading zeros in decimal integer "
@@ -1359,17 +1400,17 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
             }
         }
         else {
-            /* Decimal */
+            /* Decimal 小数 */
             c = tok_decimal_tail(tok);
             if (c == 0) {
                 return ERRORTOKEN;
             }
             {
-                /* Accept floating point numbers. */
+                /* Accept floating point numbers. 接收作为浮点数的小数点 */
                 if (c == '.') {
                     c = tok_nextc(tok);
         fraction:
-                    /* Fraction */
+                    /* Fraction 分数 */
                     if (isdigit(c)) {
                         c = tok_decimal_tail(tok);
                         if (c == 0) {
@@ -1381,7 +1422,7 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                     int e;
                   exponent:
                     e = c;
-                    /* Exponent part */
+                    /* Exponent part 指数部分 */
                     c = tok_nextc(tok);
                     if (c == '+' || c == '-') {
                         c = tok_nextc(tok);
@@ -1402,7 +1443,7 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                     }
                 }
                 if (c == 'j' || c == 'J') {
-                    /* Imaginary part */
+                    /* Imaginary part 复数的虚数部分 */
         imaginary:
                     c = tok_nextc(tok);
                 }
@@ -1413,22 +1454,25 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
         *p_end = tok->cur;
         return NUMBER;
     }
-
+    /* 字符串的引号 */
   letter_quote:
-    /* String */
+    /* String 字符串  */
     if (c == '\'' || c == '"') {
         int quote = c;
-        int quote_size = 1;             /* 1 or 3 */
+        int quote_size = 1;             /* 1 or 3 3个引号表示Python的多行字符串*/
         int end_quote_size = 0;
 
         /* Nodes of type STRING, especially multi line strings
            must be handled differently in order to get both
            the starting line number and the column offset right.
-           (cf. issue 16806) */
+           (cf. issue 16806) 类型为STRING的节点，尤其是多行字符串
+            必须以不同的方式处理，以使两者
+            起始行号和右列偏移量。
+            （请参阅问题16806） */
         tok->first_lineno = tok->lineno;
         tok->multi_line_start = tok->line_start;
 
-        /* Find the quote size and start of string */
+        /* Find the quote size and start of string 找出字符串的组成是几个引号包围的 */
         c = tok_nextc(tok);
         if (c == quote) {
             c = tok_nextc(tok);
@@ -1436,14 +1480,14 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
                 quote_size = 3;
             }
             else {
-                end_quote_size = 1;     /* empty string found */
+                end_quote_size = 1;     /* empty string found 空字符串 */
             }
         }
         if (c != quote) {
             tok_backup(tok, c);
         }
 
-        /* Get rest of string */
+        /* Get rest of string  获取字符串的其他的部分 */
         while (end_quote_size != quote_size) {
             c = tok_nextc(tok);
             if (c == EOF) {
@@ -1467,7 +1511,7 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
             else {
                 end_quote_size = 0;
                 if (c == '\\') {
-                    tok_nextc(tok);  /* skip escaped char */
+                    tok_nextc(tok);  /* skip escaped char 跳过构成转义字符的\字符 */
                 }
             }
         }
@@ -1477,7 +1521,7 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
         return STRING;
     }
 
-    /* Line continuation */
+    /* Line continuation 续行 */
     if (c == '\\') {
         c = tok_nextc(tok);
         if (c != '\n') {
@@ -1494,10 +1538,10 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
             tok_backup(tok, c);
         }
         tok->cont_line = 1;
-        goto again; /* Read next line */
+        goto again; /* Read next line 读取下一行 */
     }
 
-    /* Check for two-character token */
+    /* Check for two-character token 检查两个字符的记号 */
     {
         int c2 = tok_nextc(tok);
         int token = PyToken_TwoChars(c, c2);
@@ -1517,7 +1561,8 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
         tok_backup(tok, c2);
     }
 
-    /* Keep track of parentheses nesting level */
+    /* Keep track of parentheses nesting level 
+    跟踪括号嵌套级别 */
     switch (c) {
     case '(':
     case '[':
@@ -1557,7 +1602,7 @@ tok_get(struct tok_state *tok, const char **p_start, const char **p_end)
         break;
     }
 
-    /* Punctuation character */
+    /* Punctuation character 标点符号 */
     *p_start = tok->start;
     *p_end = tok->cur;
     return PyToken_OneChar(c);
@@ -1573,6 +1618,85 @@ PyTokenizer_Get(struct tok_state *tok, const char **p_start, const char **p_end)
     }
     return result;
 }
+
+/* Get the encoding of a Python file. Check for the coding cookie and check if
+   the file starts with a BOM.
+
+   PyTokenizer_FindEncodingFilename() returns NULL when it can't find the
+   encoding in the first or second line of the file (in which case the encoding
+   should be assumed to be UTF-8).
+
+   The char* returned is malloc'ed via PyMem_MALLOC() and thus must be freed
+   by the caller. */
+/* 获取Python文件的编码。 检查编码cookie，并检查文件是否以BOM表开头。 
+当PyTokenizer_FindEncodingFilename（）在文件的第一行或第二行中找不到编码时，
+则返回NULL（在这种情况下，应假定编码为UTF-8）。 
+返回的char *是通过PyMem_MALLOC（）分配的，因此必须由调用方释放。 */
+char *
+PyTokenizer_FindEncodingFilename(int fd, PyObject *filename)
+{
+    struct tok_state *tok;
+    FILE *fp;
+    const char *p_start = NULL;
+    const char *p_end = NULL;
+    char *encoding = NULL;
+
+    fd = _Py_dup(fd);
+    if (fd < 0) {
+        return NULL;
+    }
+
+    fp = fdopen(fd, "r");
+    if (fp == NULL) {
+        return NULL;
+    }
+    tok = PyTokenizer_FromFile(fp, NULL, NULL, NULL);
+    if (tok == NULL) {
+        fclose(fp);
+        return NULL;
+    }
+    if (filename != NULL) {
+        Py_INCREF(filename);
+        tok->filename = filename;
+    }
+    else {
+        tok->filename = PyUnicode_FromString("<string>");
+        if (tok->filename == NULL) {
+            fclose(fp);
+            PyTokenizer_Free(tok);
+            return encoding;
+        }
+    }
+    while (tok->lineno < 2 && tok->done == E_OK) {
+        PyTokenizer_Get(tok, &p_start, &p_end);
+    }
+    fclose(fp);
+    if (tok->encoding) {
+        encoding = (char *)PyMem_MALLOC(strlen(tok->encoding) + 1);
+        if (encoding)
+            strcpy(encoding, tok->encoding);
+    }
+    PyTokenizer_Free(tok);
+    return encoding;
+}
+
+char *
+PyTokenizer_FindEncoding(int fd)
+{
+    return PyTokenizer_FindEncodingFilename(fd, NULL);
+}
+
+#ifdef Py_DEBUG
+
+void
+tok_dump(int type, char *start, char *end)
+{
+    printf("%s", _PyParser_TokenNames[type]);
+    if (type == NAME || type == NUMBER || type == STRING || type == OP)
+        printf("(%.*s)", (int)(end - start), start);
+}
+
+#endif
 ```
 
 ### CPython 语法分析器
