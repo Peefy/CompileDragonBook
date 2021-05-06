@@ -902,10 +902,10 @@ void expr_override() {
     term();
     while (1) {
         if (lookahead == '+') {
-            match('+'); term(); putchar('+'); goto L;
+            match('+'); term(); putchar('+');
         } 
         else if (lookahead == '-') {
-            match('-'); term(); putchar('-'); goto L;
+            match('-'); term(); putchar('-');
         }
     }
 }
